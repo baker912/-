@@ -11,5 +11,15 @@ export default defineConfig({
   ],
   build: {
     sourcemap: 'hidden',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-antd': ['antd', '@ant-design/icons'],
+          'vendor-charts': ['echarts', 'echarts-for-react'],
+          'vendor-utils': ['dayjs', 'xlsx', '@supabase/supabase-js']
+        }
+      }
+    }
   },
 })

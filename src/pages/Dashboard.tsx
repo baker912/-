@@ -134,45 +134,36 @@ const Dashboard: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Parallel fetch for better performance
-      const [assetsResult, categoriesResult, flowsResult] = await Promise.all([
-        supabase
-          .from('assets')
-          .select('id, status, purchase_price, purchase_date, purchase_order, project_name, name, asset_code, employee_name, updated_at, category:categories(name)'),
-        supabase
-          .from('categories')
-          .select('*'),
-        supabase
-          .from('asset_flow_records')
-          .select('*, asset:assets(asset_code, name, purchase_price)')
-          .order('operation_time', { ascending: false })
-          .limit(50)
-      ]);
-
-      const assetsData = assetsResult.data;
-      const categoriesData = categoriesResult.data;
+      // 1. Fetch Assets first (Lightweight query)
+      const { data: assetsData, error: assetsError } = await supabase
+        .from('assets')
+        .select('id, status, purchase_price, purchase_date, purchase_order, project_name, name, asset_code, employee_name, updated_at, category:categories(name)');
       
-      // Handle flow filtering if needed (client-side for now as it depends on state which might not be ready)
-      // Ideally flow fetching should be separate if it depends on filters
-      let flowsData = flowsResult.data;
-
-      // Apply Time Filter locally if not 'all' (optimization: fetch all recent 50 is usually enough for "Recent Activity")
-      // If specific filtering is needed, we might need to refetch flows when filter changes.
-      // For now, let's keep the flow logic simple or move flow fetching to a separate effect if filters change.
+      if (assetsError) throw assetsError;
       
       setAssets((assetsData || []).filter((a: any) => a.status !== 'cleared') as unknown as Asset[]);
-      setCategories(categoriesData || []);
-      setFlows(flowsData || []);
+      setLoading(false); // Stop loading spinner ASAP to show stats
 
-      if (categoriesData && categoriesData.length > 0 && !selectedCategory) setSelectedCategory(categoriesData[0].name);
-      
-      const uniqueOrders = Array.from(new Set((assetsData || []).map((a: any) => a.purchase_order).filter(Boolean)));
-      if (uniqueOrders.length > 0 && !selectedOrder) setSelectedOrder(uniqueOrders[0] as string);
+      // 2. Fetch Categories and Flows in background
+      Promise.all([
+        supabase.from('categories').select('*'),
+        supabase.from('asset_flow_records').select('*, asset:assets(asset_code, name, purchase_price)').order('operation_time', { ascending: false }).limit(50)
+      ]).then(([categoriesResult, flowsResult]) => {
+        const categoriesData = categoriesResult.data || [];
+        const flowsData = flowsResult.data || [];
+
+        setCategories(categoriesData);
+        setFlows(flowsData);
+
+        if (categoriesData.length > 0 && !selectedCategory) setSelectedCategory(categoriesData[0].name);
+        
+        const uniqueOrders = Array.from(new Set((assetsData || []).map((a: any) => a.purchase_order).filter(Boolean)));
+        if (uniqueOrders.length > 0 && !selectedOrder) setSelectedOrder(uniqueOrders[0] as string);
+      });
 
     } catch (error: any) {
       console.error(error);
       message.error('数据加载异常');
-    } finally {
       setLoading(false);
     }
   };
