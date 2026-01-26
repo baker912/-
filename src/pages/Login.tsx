@@ -10,6 +10,22 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const [messageApi, contextHolder] = message.useMessage();
 
+  // Captcha State
+  const generateCaptcha = () => {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz';
+    let code = '';
+    for (let i = 0; i < 4; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  };
+
+  const [captchaCode, setCaptchaCode] = useState(generateCaptcha());
+
+  const refreshCaptcha = () => {
+    setCaptchaCode(generateCaptcha());
+  };
+
   // Mock SSO Login
   const handleSSO = () => {
     messageApi.loading({ content: '正在跳转统一身份认证...', key: 'sso' });
@@ -194,12 +210,16 @@ const Login: React.FC = () => {
                         className="rounded-xl bg-gray-50/50 border-gray-200 focus:bg-white hover:bg-white transition-colors"
                      />
                    </Form.Item>
-                   <div className="w-32 h-[50px] bg-white rounded-xl border border-gray-200 flex items-center justify-center cursor-pointer hover:shadow-sm transition-shadow relative overflow-hidden group" title="点击刷新">
+                   <div 
+                     className="w-32 h-[50px] bg-white rounded-xl border border-gray-200 flex items-center justify-center cursor-pointer hover:shadow-sm transition-shadow relative overflow-hidden group select-none" 
+                     title="点击刷新"
+                     onClick={refreshCaptcha}
+                   >
                       <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></div>
                       {/* Noise Background */}
                       <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '5px 5px' }}></div>
                       <span className="text-2xl font-black font-mono text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-purple-600 italic tracking-widest transform -rotate-3" style={{ filter: 'blur(0.3px)' }}>
-                         tsm3c
+                         {captchaCode}
                       </span>
                    </div>
                 </div>
