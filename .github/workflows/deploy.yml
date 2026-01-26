@@ -1,0 +1,40 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches:
+      - main  # 当代码推送到 main 分支时触发
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 安装 Node.js 环境
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: npm install
+
+      # 4. 构建项目
+      - name: Build project
+        run: npm run build
+
+      # 5. 将构建产物传输到服务器
+      - name: Deploy to Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}      # 服务器 IP
+          username: ${{ secrets.SERVER_USER }}  # 服务器用户名 (如 root)
+          key: ${{ secrets.SERVER_SSH_KEY }}    # SSH 私钥
+          source: "dist/*"                      # 要传输的文件
+          target: "/usr/share/nginx/html"       # 服务器上的目标目录
+          strip_components: 1                   # 去除 dist 这一层目录结构，直接放内容
