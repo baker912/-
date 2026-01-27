@@ -48,8 +48,8 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
         .from('assets')
         .select(`
           *,
-          category:categories(name),
-          flows:asset_flow_records(
+          category:categories!assets_category_id_fkey(name),
+          flows:asset_flow_records!asset_flow_records_asset_id_fkey(
             id,
             operation_type,
             operation_time,

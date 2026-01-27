@@ -42,6 +42,10 @@ const RequestList: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [fileList, setFileList] = useState<any[]>([]);
 
+  // Selection state
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [selectedRows, setSelectedRows] = useState<AssetRequest[]>([]);
+
   useEffect(() => {
     fetchRequests();
     fetchMetadata();
@@ -253,6 +257,45 @@ const RequestList: React.FC = () => {
     }
   };
 
+  const handleExport = (type: 'all' | 'selected') => {
+    const exportData = type === 'selected' ? selectedRows : data;
+    
+    if (exportData.length === 0) {
+      message.warning('暂无数据可导出');
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(exportData.map((item, index) => ({
+      序号: index + 1,
+      需求名称: item.request_name,
+      需求类别: item.request_type,
+      附件: item.attachment || '无',
+      备注说明: item.description,
+      创建人: item.creator?.name || item.creator?.email || '未知',
+      创建时间: dayjs(item.created_at).format('YYYY-MM-DD HH:mm:ss'),
+    })));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "需求清单");
+    XLSX.writeFile(wb, `需求清单_${dayjs().format('YYYYMMDDHHmmss')}.xlsx`);
+  };
+
+  const exportMenu = {
+    items: [
+      {
+        key: 'selected',
+        label: '导出选中数据',
+        disabled: selectedRowKeys.length === 0,
+        onClick: () => handleExport('selected'),
+      },
+      {
+        key: 'all',
+        label: '导出全部数据',
+        onClick: () => handleExport('all'),
+      },
+    ],
+  };
+
   const importMenu = {
     items: [
       {
@@ -364,16 +407,33 @@ const RequestList: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="bg-white p-4 rounded-lg shadow-sm">
-        <div className="mb-4 flex gap-2">
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>新增</Button>
-          <Dropdown menu={importMenu}>
-            <Button icon={<ImportOutlined />}>
-              导入 <DownOutlined />
-            </Button>
-          </Dropdown>
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex gap-2">
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>新增</Button>
+            <Dropdown menu={importMenu}>
+              <Button icon={<ImportOutlined />}>
+                导入 <DownOutlined />
+              </Button>
+            </Dropdown>
+            <Dropdown menu={exportMenu}>
+              <Button icon={<ExportOutlined />}>
+                导出 <DownOutlined />
+              </Button>
+            </Dropdown>
+          </div>
+          {selectedRowKeys.length > 0 && (
+            <span className="text-gray-500">已选择 {selectedRowKeys.length} 项</span>
+          )}
         </div>
         
         <Table 
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys, rows) => {
+              setSelectedRowKeys(keys);
+              setSelectedRows(rows);
+            },
+          }}
           columns={columns} 
           dataSource={data} 
           rowKey="id" 

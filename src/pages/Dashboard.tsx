@@ -22,7 +22,12 @@ import {
   ArrowRightOutlined,
   RiseOutlined,
   FallOutlined,
-  HistoryOutlined
+  HistoryOutlined,
+  FullscreenOutlined,
+  ReloadOutlined,
+  ExportOutlined,
+  TableOutlined,
+  ProjectOutlined
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { supabase } from '../lib/supabase';
@@ -59,6 +64,7 @@ interface DistributionNode {
   count: number;
   totalValue: number;
   inUseCount: number;
+  inStockCount: number;
   children?: DistributionNode[];
 }
 
@@ -144,10 +150,27 @@ const Dashboard: React.FC = () => {
   // Detail Modal State
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [selectedSlice, setSelectedSlice] = useState<{ name: string, type: 'brand' | 'model' } | null>(null);
-  const [detailSearchText, setDetailSearchText] = useState('');
-  const [detailStatusFilter, setDetailStatusFilter] = useState<string | null>(null);
+  const [detailFilters, setDetailFilters] = useState({
+    keyword: '',
+    status: [] as string[],
+    dateRange: null as any
+  });
 
-  // Stagnant Inventory State removed as it is now a separate component
+  // Usage Status Analysis State
+  const [usageDimension, setUsageDimension] = useState<'status' | 'department' | 'category' | 'age'>('status');
+  const [selectedUsageSlice, setSelectedUsageSlice] = useState<string | null>(null);
+
+  // --- Usage Duration Stats ---
+  const [durationDimension, setDurationDimension] = useState<'category' | 'brand' | 'model'>('category');
+
+  // --- Order Assets Full View & Filter ---
+  const [viewAllModalVisible, setViewAllModalVisible] = useState(false);
+  const [orderAssetFilters, setOrderAssetFilters] = useState({
+    keyword: '',
+    status: [] as string[],
+    type: [] as string[],
+    dateRange: null as any
+  });
 
   useEffect(() => {
     fetchData();
@@ -159,7 +182,7 @@ const Dashboard: React.FC = () => {
       // 1. Fetch Assets first (Lightweight query)
       const { data: assetsData, error: assetsError } = await supabase
         .from('assets')
-        .select('id, status, purchase_price, purchase_date, purchase_order, project_name, name, asset_code, employee_name, updated_at, brand, model, serial_number, department_name, arrival_date, category:categories(name)');
+        .select('id, status, purchase_price, purchase_date, purchase_order, project_name, name, asset_code, employee_name, updated_at, brand, model, serial_number, department_name, arrival_date, location, specific_location, category:categories!assets_category_id_fkey(name)');
       
       if (assetsError) throw assetsError;
       
@@ -169,7 +192,7 @@ const Dashboard: React.FC = () => {
       // 2. Fetch Categories and Flows in background
       Promise.all([
         supabase.from('categories').select('*'),
-        supabase.from('asset_flow_records').select('*, asset:assets(asset_code, name, purchase_price)').order('operation_time', { ascending: false }).limit(50)
+        supabase.from('asset_flow_records').select('*, asset:assets!asset_flow_records_asset_id_fkey(asset_code, name, purchase_price)').order('operation_time', { ascending: false }).limit(50)
       ]).then(([categoriesResult, flowsResult]) => {
         const categoriesData = categoriesResult.data || [];
         const flowsData = flowsResult.data || [];
@@ -185,7 +208,7 @@ const Dashboard: React.FC = () => {
 
     } catch (error: any) {
       console.error(error);
-      message.error('数据加载异常');
+      message.error('数据加载异常: ' + (error.message || '服务连接失败'));
       setLoading(false);
     }
   };
@@ -258,6 +281,7 @@ const Dashboard: React.FC = () => {
       const modelName = asset.model || '未知型号';
       const price = asset.purchase_price || 0;
       const isInUse = asset.status === 'in_use';
+      const isInStock = asset.status === 'in_stock';
 
       // 1. Category Level
       let catNode = categoryMap.get(catName);
@@ -269,6 +293,7 @@ const Dashboard: React.FC = () => {
           count: 0,
           totalValue: 0,
           inUseCount: 0,
+          inStockCount: 0,
           children: []
         };
         categoryMap.set(catName, catNode);
@@ -277,13 +302,9 @@ const Dashboard: React.FC = () => {
       catNode.count++;
       catNode.totalValue += price;
       if (isInUse) catNode.inUseCount++;
+      if (isInStock) catNode.inStockCount++;
 
       // 2. Second Level (Brand or Model based on drillDownType)
-      // Note: We need to support dynamic switching. 
-      // Instead of hardcoding Brand -> Model hierarchy, we construct the tree based on current `drillDownType`.
-      // BUT `distributionTreeData` should probably be stable or re-compute when type changes.
-      // Let's make the second level dynamic.
-      
       const secondLevelName = drillDownType === 'brand' ? brandName : modelName;
       const secondLevelType = drillDownType === 'brand' ? 'brand' : 'model';
       const secondLevelKey = `${drillDownType}_${catName}_${secondLevelName}`;
@@ -297,6 +318,7 @@ const Dashboard: React.FC = () => {
           count: 0,
           totalValue: 0,
           inUseCount: 0,
+          inStockCount: 0,
           children: []
         };
         catNode.children?.push(secondNode);
@@ -304,6 +326,7 @@ const Dashboard: React.FC = () => {
       secondNode.count++;
       secondNode.totalValue += price;
       if (isInUse) secondNode.inUseCount++;
+      if (isInStock) secondNode.inStockCount++;
 
       // 3. Third Level (The other one)
       const thirdLevelName = drillDownType === 'brand' ? modelName : brandName;
@@ -318,65 +341,85 @@ const Dashboard: React.FC = () => {
           type: thirdLevelType,
           count: 0,
           totalValue: 0,
-          inUseCount: 0
+          inUseCount: 0,
+          inStockCount: 0
         };
         secondNode.children?.push(thirdNode);
       }
       thirdNode.count++;
       thirdNode.totalValue += price;
       if (isInUse) thirdNode.inUseCount++;
+      if (isInStock) thirdNode.inStockCount++;
     });
 
     return tree;
-  }, [assets, drillDownType]); // Re-compute when drillDownType changes
+  }, [assets, drillDownType]);
 
-  const categoryStats = useMemo(() => {
-    if (!selectedCategory) return null;
-    const filtered = assets.filter(a => a.category?.name === selectedCategory);
-    const totalCount = filtered.length;
-    const totalValue = filtered.reduce((sum, a) => sum + (a.purchase_price || 0), 0);
-    
+  const usageStatusStats = useMemo(() => {
+    const data: Record<string, { count: number, assets: Asset[] }> = {};
     const now = dayjs();
-    const ages = filtered.map(a => a.purchase_date ? now.diff(dayjs(a.purchase_date), 'year', true) : 0);
-    const avgAge = ages.length ? ages.reduce((a, b) => a + b, 0) / ages.length : 0;
-    
-    const statusDist = {
-      in_stock: filtered.filter(a => a.status === 'in_stock').length,
-      in_use: filtered.filter(a => a.status === 'in_use').length,
-    };
-
-    return { filtered, totalCount, totalValue, avgAge, statusDist };
-  }, [assets, selectedCategory]);
-
-  const orderStats = useMemo(() => {
-    if (!selectedOrder) return null;
-    const filtered = assets.filter(a => a.purchase_order === selectedOrder);
-    const totalCount = filtered.length;
-    const totalAmount = filtered.reduce((sum, a) => sum + (a.purchase_price || 0), 0);
-    const inStock = filtered.filter(a => a.status === 'in_stock').length;
-    const issued = filtered.filter(a => a.status === 'in_use').length;
-    return { filtered, totalCount, totalAmount, inStock, issued };
-  }, [assets, selectedOrder]);
-
-  const lifespanStats = useMemo(() => {
-    const now = dayjs();
-    const buckets = { '0-2年': 0, '2-4年': 0, '4年以上': 0 };
-    const warningAssets: Asset[] = [];
 
     assets.forEach(asset => {
-      if (asset.purchase_date) {
-        const age = now.diff(dayjs(asset.purchase_date), 'year', true);
-        if (age < 2) buckets['0-2年']++;
-        else if (age < 4) buckets['2-4年']++;
-        else {
-          buckets['4年以上']++;
-          warningAssets.push(asset);
-        }
+      let key = '其他';
+      
+      switch(usageDimension) {
+        case 'status':
+          if (asset.status === 'in_stock') key = '在库';
+          else if (asset.status === 'in_use') key = '在用';
+          else if (asset.status === 'maintenance') key = '维修中';
+          else if (asset.status === 'scrapped') key = '已报废';
+          else if (asset.status === 'disposed') key = '已处置';
+          else key = asset.status || '未知';
+          break;
+        case 'department':
+          key = asset.department_name || '未分配部门';
+          break;
+        case 'category':
+          key = asset.category?.name || '其他';
+          break;
+        case 'age':
+          if (!asset.purchase_date) key = '未知';
+          else {
+            const age = now.diff(dayjs(asset.purchase_date), 'year', true);
+            if (age < 1) key = '1年以内';
+            else if (age < 3) key = '1-3年';
+            else if (age < 5) key = '3-5年';
+            else key = '5年以上';
+          }
+          break;
       }
+
+      if (!data[key]) data[key] = { count: 0, assets: [] };
+      data[key].count++;
+      data[key].assets.push(asset);
     });
 
-    return { buckets, warningAssets };
-  }, [assets]);
+    return data;
+  }, [assets, usageDimension]);
+
+  const usagePieOption = useMemo(() => {
+    const data = Object.entries(usageStatusStats).map(([name, { count }]) => ({ name, value: count }));
+    
+    return {
+      color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#6366f1'],
+      tooltip: { trigger: 'item' },
+      legend: { type: 'scroll', bottom: 0 },
+      series: [{
+        name: '设备分布',
+        type: 'pie',
+        radius: ['40%', '70%'],
+        center: ['50%', '45%'],
+        itemStyle: { borderRadius: 5, borderColor: '#fff', borderWidth: 2 },
+        label: { show: true, formatter: '{b}: {c}' },
+        data
+      }]
+    };
+  }, [usageStatusStats]);
+
+  const filteredUsageList = useMemo(() => {
+    if (!selectedUsageSlice) return [];
+    return usageStatusStats[selectedUsageSlice]?.assets || [];
+  }, [usageStatusStats, selectedUsageSlice]);
 
   const scrapStats = useMemo(() => {
     const now = dayjs();
@@ -390,6 +433,202 @@ const Dashboard: React.FC = () => {
     const totalValue = candidates.reduce((sum, a) => sum + (a.purchase_price || 0), 0);
     return { candidates, totalCount: candidates.length, totalValue };
   }, [assets]);
+
+  const orderStats = useMemo(() => {
+    if (!selectedOrder) return null;
+    // Sort by updated_at desc by default
+    const filtered = assets
+      .filter(a => a.purchase_order === selectedOrder)
+      .sort((a, b) => dayjs(b.updated_at).unix() - dayjs(a.updated_at).unix());
+      
+    if (filtered.length === 0) return null;
+
+    const totalAmount = filtered.reduce((sum, a) => sum + (a.purchase_price || 0), 0);
+    const issued = filtered.filter(a => a.status === 'in_use').length;
+    const inStock = filtered.filter(a => a.status === 'in_stock').length;
+    const projectName = filtered[0]?.project_name || '未知项目';
+
+    return { totalCount: filtered.length, totalAmount, issued, inStock, filtered, projectName };
+  }, [assets, selectedOrder]);
+
+  const filteredOrderAssets = useMemo(() => {
+    if (!orderStats?.filtered) return [];
+    
+    return orderStats.filtered.filter(asset => {
+      // 1. Keyword
+      if (orderAssetFilters.keyword) {
+        const lower = orderAssetFilters.keyword.toLowerCase();
+        const match = (asset.asset_code?.toLowerCase().includes(lower)) || 
+                      (asset.name?.toLowerCase().includes(lower)) ||
+                      (asset.employee_name?.toLowerCase().includes(lower)) ||
+                      (asset.department_name?.toLowerCase().includes(lower));
+        if (!match) return false;
+      }
+
+      // 2. Status
+      if (orderAssetFilters.status.length > 0) {
+        if (!orderAssetFilters.status.includes(asset.status || '')) return false;
+      }
+
+      // 3. Type (Category)
+      if (orderAssetFilters.type.length > 0) {
+        if (!orderAssetFilters.type.includes(asset.category?.name || '其他')) return false;
+      }
+
+      // 4. Date Range (Arrival Date)
+      if (orderAssetFilters.dateRange && orderAssetFilters.dateRange.length === 2) {
+        const start = orderAssetFilters.dateRange[0];
+        const end = orderAssetFilters.dateRange[1];
+        const date = dayjs(asset.arrival_date || asset.created_at);
+        if (date.isBefore(start) || date.isAfter(end)) return false;
+      }
+
+      return true;
+    });
+  }, [orderStats, orderAssetFilters]);
+
+  const resetOrderAssetFilters = () => {
+    setOrderAssetFilters({
+      keyword: '',
+      status: [],
+      type: [],
+      dateRange: null
+    });
+  };
+
+  // Sync duration dimension with drill down
+  useEffect(() => {
+    if (!drillDownCategory) {
+      setDurationDimension('category');
+    } else if (drillDownType === 'brand') {
+      setDurationDimension('brand');
+    } else {
+      setDurationDimension('model');
+    }
+  }, [drillDownCategory, drillDownType]);
+
+  const durationStats = useMemo(() => {
+    // 1. Filter assets based on drill-down context
+    let targetAssets = assets;
+    if (drillDownCategory) {
+      targetAssets = targetAssets.filter(a => (a.category?.name || '其他') === drillDownCategory);
+    }
+
+    const now = dayjs();
+    const statsMap: Record<string, { count: number, totalMonths: number, ranges: Record<string, number> }> = {};
+
+    targetAssets.forEach(asset => {
+      // Determine grouping key
+      let key = '其他';
+      if (durationDimension === 'category') key = asset.category?.name || '其他';
+      else if (durationDimension === 'brand') key = asset.brand || '未知品牌';
+      else if (durationDimension === 'model') key = asset.model || '未知型号';
+
+      // Calculate usage months
+      // Priority: use_months field -> diff(now, purchase_date) -> 0
+      let months = 0;
+      if (asset.purchase_date) {
+        months = now.diff(dayjs(asset.purchase_date), 'month');
+      }
+      if (months < 0) months = 0;
+
+      // Initialize group stats
+      if (!statsMap[key]) {
+        statsMap[key] = { 
+          count: 0, 
+          totalMonths: 0, 
+          ranges: { '0-1年': 0, '1-3年': 0, '3-5年': 0, '5年以上': 0 } 
+        };
+      }
+
+      // Update stats
+      statsMap[key].count++;
+      statsMap[key].totalMonths += months;
+
+      const years = months / 12;
+      if (years < 1) statsMap[key].ranges['0-1年']++;
+      else if (years < 3) statsMap[key].ranges['1-3年']++;
+      else if (years < 5) statsMap[key].ranges['3-5年']++;
+      else statsMap[key].ranges['5年以上']++;
+    });
+
+    // Transform to array and sort by count desc
+    return Object.entries(statsMap)
+      .map(([name, stat]) => ({
+        name,
+        avgYears: stat.count > 0 ? (stat.totalMonths / stat.count / 12).toFixed(1) : '0.0',
+        count: stat.count,
+        ranges: stat.ranges
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [assets, durationDimension, drillDownCategory, drillDownType]);
+
+  const durationBarOption = useMemo(() => {
+    // Top 10 items to avoid clutter
+    const displayData = durationStats.slice(0, 10);
+    const categories = displayData.map(d => d.name);
+    
+    return {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' }
+      },
+      legend: {
+        data: ['0-1年', '1-3年', '3-5年', '5年以上'],
+        bottom: 0
+      },
+      grid: {
+        left: '0%',
+        right: '4%',
+        bottom: '10%',
+        top: '2%',
+        containLabel: true
+      },
+      xAxis: {
+        type: 'value',
+        name: '数量'
+      },
+      yAxis: {
+        type: 'category',
+        data: categories,
+        inverse: true // Top items at top
+      },
+      series: [
+        {
+          name: '0-1年',
+          type: 'bar',
+          stack: 'total',
+          emphasis: { focus: 'series' },
+          data: displayData.map(d => d.ranges['0-1年']),
+          itemStyle: { color: '#3b82f6' }
+        },
+        {
+          name: '1-3年',
+          type: 'bar',
+          stack: 'total',
+          emphasis: { focus: 'series' },
+          data: displayData.map(d => d.ranges['1-3年']),
+          itemStyle: { color: '#10b981' }
+        },
+        {
+          name: '3-5年',
+          type: 'bar',
+          stack: 'total',
+          emphasis: { focus: 'series' },
+          data: displayData.map(d => d.ranges['3-5年']),
+          itemStyle: { color: '#f59e0b' }
+        },
+        {
+          name: '5年以上',
+          type: 'bar',
+          stack: 'total',
+          emphasis: { focus: 'series' },
+          data: displayData.map(d => d.ranges['5年以上']),
+          itemStyle: { color: '#ef4444' }
+        }
+      ]
+    };
+  }, [durationStats]);
 
   // --- Export ---
   const handleExport = (data: any[], filename: string) => {
@@ -419,13 +658,24 @@ const Dashboard: React.FC = () => {
         series: [{
           name: `${drillDownCategory} - ${typeLabel}分布`,
           type: 'pie',
-          radius: ['45%', '70%'],
+          radius: ['50%', '80%'],
           center: ['50%', '45%'],
-          avoidLabelOverlap: false,
+          avoidLabelOverlap: true,
           itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-          label: { show: true, position: 'outside', formatter: '{b}: {c} ({d}%)' },
-          emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } },
-          labelLine: { show: true },
+          label: { 
+            show: true, 
+            position: 'outside', 
+            formatter: '{b}: {c} ({d}%)',
+            minMargin: 5,
+            edgeDistance: 10,
+            lineHeight: 15,
+          },
+          emphasis: { 
+            scale: true,
+            scaleSize: 10,
+            label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } 
+          },
+          labelLine: { show: true, length: 15, length2: 0, maxSurfaceAngle: 80 },
           data: Object.entries(dataMap).map(([name, value]) => ({ name, value }))
         }]
       };
@@ -439,13 +689,24 @@ const Dashboard: React.FC = () => {
       series: [{
         name: '资产分类',
         type: 'pie',
-        radius: ['45%', '70%'],
+        radius: ['50%', '80%'],
         center: ['50%', '45%'],
-        avoidLabelOverlap: false,
+        avoidLabelOverlap: true,
         itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-        label: { show: true, position: 'outside', formatter: '{b}: {c} ({d}%)' },
-        emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } },
-        labelLine: { show: true },
+        label: { 
+          show: true, 
+          position: 'outside', 
+          formatter: '{b}: {c} ({d}%)',
+          minMargin: 5,
+          edgeDistance: 10,
+          lineHeight: 15
+        },
+        emphasis: { 
+          scale: true,
+          scaleSize: 10,
+          label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } 
+        },
+        labelLine: { show: true, length: 15, length2: 0, maxSurfaceAngle: 80 },
         data: Object.entries(overviewStats.categoryData).map(([name, value]) => ({ name, value }))
       }]
     };
@@ -464,8 +725,11 @@ const Dashboard: React.FC = () => {
         type: drillDownType
       });
       setDetailModalVisible(true);
-      setDetailSearchText('');
-      setDetailStatusFilter(null);
+      setDetailFilters({
+        keyword: '',
+        status: [],
+        dateRange: null
+      });
     }
   };
 
@@ -483,25 +747,49 @@ const Dashboard: React.FC = () => {
         : (asset.model || '未知型号');
       if (assetSliceValue !== selectedSlice.name) return false;
 
-      // 3. Search Filter
-      if (detailSearchText) {
-        const searchLower = detailSearchText.toLowerCase();
-        const matchesCode = asset.asset_code?.toLowerCase().includes(searchLower);
-        const matchesSerial = asset.serial_number?.toLowerCase().includes(searchLower);
-        if (!matchesCode && !matchesSerial) return false;
+      // 3. Keyword Search
+      if (detailFilters.keyword) {
+        const lower = detailFilters.keyword.toLowerCase();
+        const matchesCode = asset.asset_code?.toLowerCase().includes(lower);
+        const matchesSerial = asset.serial_number?.toLowerCase().includes(lower);
+        const matchesName = asset.name?.toLowerCase().includes(lower);
+        const matchesEmp = asset.employee_name?.toLowerCase().includes(lower);
+        if (!matchesCode && !matchesSerial && !matchesName && !matchesEmp) return false;
       }
 
       // 4. Status Filter
-      if (detailStatusFilter) {
-        if (asset.status !== detailStatusFilter) return false;
+      if (detailFilters.status.length > 0) {
+        if (!detailFilters.status.includes(asset.status || '')) return false;
+      }
+
+      // 5. Date Range
+      if (detailFilters.dateRange && detailFilters.dateRange.length === 2) {
+        const start = detailFilters.dateRange[0];
+        const end = detailFilters.dateRange[1];
+        const date = dayjs(asset.arrival_date || asset.created_at);
+        if (date.isBefore(start) || date.isAfter(end)) return false;
       }
 
       return true;
     });
   };
 
+  const resetDetailFilters = () => {
+    setDetailFilters({
+      keyword: '',
+      status: [],
+      dateRange: null
+    });
+  };
+
   const filteredTreeData = useMemo(() => {
-    if (!drillDownCategory) return distributionTreeData;
+    if (!drillDownCategory) {
+      // Return shallow copies of top-level nodes without children to prevent expansion
+      return distributionTreeData.map(node => ({
+        ...node,
+        children: undefined
+      }));
+    }
     
     // Find the node corresponding to the selected category
     const catNode = distributionTreeData.find(node => node.name === drillDownCategory);
@@ -510,23 +798,6 @@ const Dashboard: React.FC = () => {
     // Return the category node (it will be expanded by expandedRowKeys)
     return [catNode];
   }, [distributionTreeData, drillDownCategory]);
-
-  const barOption = useMemo(() => ({
-    color: ['#6366f1'],
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
-    xAxis: [{ type: 'category', data: Object.keys(lifespanStats.buckets), axisLine: { show: false }, axisTick: { show: false } }],
-    yAxis: [{ type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#eee' } } }],
-    series: [{ 
-      name: '设备数量', 
-      type: 'bar', 
-      barWidth: '40%', 
-      data: Object.values(lifespanStats.buckets),
-      itemStyle: { borderRadius: [6, 6, 0, 0] },
-      showBackground: true,
-      backgroundStyle: { color: 'rgba(180, 180, 180, 0.1)' }
-    }]
-  }), [lifespanStats]);
 
   const orderOptions = useMemo(() => {
     const orders = Array.from(new Set(assets.map(a => a.purchase_order).filter(Boolean)));
@@ -631,22 +902,7 @@ const Dashboard: React.FC = () => {
         <Row gutter={[24, 24]} className="mb-8">
           <Col span={24}>
              <GlassCard 
-               title={
-                 <div className="flex items-center gap-4">
-                    <span>{drillDownCategory ? `${drillDownCategory} 分布详情` : "资产分布概览 & 深度统计"}</span>
-                    {drillDownCategory && (
-                      <Radio.Group 
-                        value={drillDownType} 
-                        onChange={e => setDrillDownType(e.target.value)}
-                        size="small"
-                        buttonStyle="solid"
-                      >
-                        <Radio.Button value="brand">按品牌</Radio.Button>
-                        <Radio.Button value="model">按型号</Radio.Button>
-                      </Radio.Group>
-                    )}
-                 </div>
-               }
+               title="资产分布概览 & 深度统计"
                icon={<PieChartOutlined />} 
                className="h-full"
                extra={
@@ -662,32 +918,88 @@ const Dashboard: React.FC = () => {
                }
              >
                <Row gutter={[24, 24]}>
-                 <Col xs={24} lg={10} xl={8}>
-                   <div className="flex flex-col h-full min-h-[400px]">
-                      <div className="flex-1 flex items-center justify-center relative">
-                        {/* Center Text for Total if needed, or just Legend */}
+                 <Col xs={24} lg={14}>
+                   <div className="h-full border-r border-gray-100 pr-6">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                           <PieChartOutlined className="text-indigo-500" />
+                           <span className="font-bold text-gray-700">
+                             {drillDownCategory ? `${drillDownCategory} 分布详情` : "资产分类分布"}
+                           </span>
+                           <span className="text-xs font-normal text-gray-400 ml-2 hidden sm:inline-block">
+                              {drillDownCategory 
+                                ? '💡 点击扇区查看清单' 
+                                : '💡 点击扇区可下钻'}
+                           </span>
+                        </div>
+                        {drillDownCategory && (
+                          <Radio.Group 
+                            value={drillDownType} 
+                            onChange={e => setDrillDownType(e.target.value)}
+                            size="small"
+                            buttonStyle="solid"
+                          >
+                            <Radio.Button value="brand">按品牌</Radio.Button>
+                            <Radio.Button value="model">按型号</Radio.Button>
+                          </Radio.Group>
+                        )}
+                      </div>
+
+                      <div className="w-full relative">
                         <ReactECharts 
                             option={pieOption} 
-                            style={{ height: '360px', width: '100%', cursor: 'pointer' }} 
+                            style={{ height: '370px', width: '100%', cursor: 'pointer' }} 
                             onEvents={{
                               'click': onPieClick
                             }}
                         />
                       </div>
-                      <div className="text-center mt-2">
-                        <div className={`text-sm font-medium ${drillDownCategory ? 'text-indigo-600' : 'text-gray-500'}`}>
-                           {drillDownCategory ? '👆 点击扇区查看资产清单' : '👆 点击扇区钻取至详细分类'}
-                        </div>
-                        <div className="text-xs text-gray-400 mt-1">图表与右侧表格联动交互</div>
-                      </div>
                    </div>
                  </Col>
-                 <Col xs={24} lg={14} xl={16}>
-                   <div className="h-full border-l border-gray-100 pl-6">
-                      <div className="mb-4 flex justify-between items-center">
-                         <h4 className="font-bold text-gray-700 m-0">多维资产统计报表</h4>
-                         <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded">
-                            分类 &gt; {drillDownType === 'brand' ? '品牌' : '型号'} &gt; {drillDownType === 'brand' ? '型号' : '品牌'}
+
+                 <Col xs={24} lg={10}>
+                    <div className="h-full pl-2">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                           <HistoryOutlined className="text-indigo-500" />
+                           <span className="font-bold text-gray-700">资产使用年限分布</span>
+                        </div>
+                        <Radio.Group 
+                          value={durationDimension} 
+                          onChange={e => setDurationDimension(e.target.value)}
+                          size="small"
+                          buttonStyle="solid"
+                          disabled={!!drillDownCategory}
+                        >
+                          <Radio.Button value="category">品类</Radio.Button>
+                          <Radio.Button value="brand">品牌</Radio.Button>
+                          <Radio.Button value="model">型号</Radio.Button>
+                        </Radio.Group>
+                      </div>
+                      
+                      <div className="bg-gray-50 rounded-lg p-2 mb-1 flex justify-between items-center text-xs text-gray-500">
+                         <span>当前统计范围：<span className="font-bold text-gray-700">{drillDownCategory || '全部分类'}</span></span>
+                         <span>平均年限：<span className="font-bold text-indigo-600">
+                           {(durationStats.reduce((sum, item) => sum + (parseFloat(item.avgYears) * item.count), 0) / (durationStats.reduce((sum, item) => sum + item.count, 0) || 1)).toFixed(1)} 年
+                         </span></span>
+                      </div>
+
+                      <ReactECharts 
+                        option={durationBarOption}
+                        style={{ height: '320px', width: '100%' }}
+                      />
+                    </div>
+                 </Col>
+                 
+                 <Col span={24}>
+                   <div className="border-t border-gray-100 pt-6 mt-2">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                           <TableOutlined className="text-indigo-500" />
+                           <span className="font-bold text-gray-700">多维资产统计报表</span>
+                        </div>
+                         <span className="text-sm text-gray-500 bg-gray-50 px-3 py-1 rounded-full border border-gray-100">
+                            当前路径：品类 &gt; {drillDownType === 'brand' ? '品牌' : '型号'} &gt; {drillDownType === 'brand' ? '型号' : '品牌'}
                          </span>
                        </div>
                       <Table
@@ -696,12 +1008,12 @@ const Dashboard: React.FC = () => {
                             title: '名称', 
                             dataIndex: 'name', 
                             key: 'name',
-                            width: '30%',
+                            width: '20%',
                             render: (text, record) => (
                               <span className={`
-                                ${record.type === 'category' ? 'font-bold text-gray-800' : ''}
-                                ${record.type === 'brand' ? 'font-medium text-gray-600' : ''}
-                                ${record.type === 'model' ? 'text-gray-500 text-sm' : ''}
+                                ${record.type === 'category' ? 'font-bold text-gray-800 text-base' : ''}
+                                ${record.type === 'brand' ? 'font-medium text-gray-700 text-base' : ''}
+                                ${record.type === 'model' ? 'text-gray-600 text-sm' : ''}
                               `}>
                                 {text}
                               </span>
@@ -712,30 +1024,48 @@ const Dashboard: React.FC = () => {
                             dataIndex: 'count', 
                             key: 'count', 
                             align: 'right',
-                            width: '15%',
+                            width: '14%',
                             sorter: (a, b) => a.count - b.count,
-                            render: (v) => <span className="font-medium">{v}</span>
+                            render: (v) => <span className="font-bold text-gray-800 text-base">{v}</span>
+                          },
+                          { 
+                            title: '在库', 
+                            dataIndex: 'inStockCount', 
+                            key: 'inStockCount', 
+                            align: 'right',
+                            width: '14%',
+                            sorter: (a, b) => a.inStockCount - b.inStockCount,
+                            render: (v) => <span className="text-blue-600 font-medium text-base">{v}</span>
+                          },
+                          { 
+                            title: '在用', 
+                            dataIndex: 'inUseCount', 
+                            key: 'inUseCount', 
+                            align: 'right',
+                            width: '14%',
+                            sorter: (a, b) => a.inUseCount - b.inUseCount,
+                            render: (v) => <span className="text-green-600 font-medium text-base">{v}</span>
                           },
                           { 
                             title: '总价值', 
                             dataIndex: 'totalValue', 
                             key: 'totalValue', 
                             align: 'right',
-                            width: '25%',
+                            width: '18%',
                             sorter: (a, b) => a.totalValue - b.totalValue,
-                            render: (v) => <span className="font-mono">¥ {v.toLocaleString()}</span>
+                            render: (v) => <span className="font-mono text-gray-700 text-base">¥ {v.toLocaleString()}</span>
                           },
                           { 
                             title: '利用率', 
                             key: 'utilization',
-                            width: '30%',
+                            width: '20%',
                             render: (_, record) => {
                               const percent = record.count > 0 ? (record.inUseCount / record.count) * 100 : 0;
                               return (
-                                <div className="w-full flex items-center gap-2">
+                                <div className="w-full flex items-center gap-3">
                                   <Progress 
                                     percent={parseFloat(percent.toFixed(1))} 
-                                    size="small" 
+                                    size="default" 
                                     strokeColor={percent > 80 ? '#10b981' : percent > 50 ? '#3b82f6' : '#f59e0b'}
                                     trailColor="#f3f4f6"
                                   />
@@ -746,12 +1076,13 @@ const Dashboard: React.FC = () => {
                         ]}
                         dataSource={filteredTreeData}
                         pagination={false}
-                        size="small"
-                        scroll={{ y: 400 }}
+                        size="middle"
+                        scroll={{ y: 500 }}
                         className="custom-tree-table"
                         expandable={{
                           expandedRowKeys: expandedTreeKeys,
-                          onExpandedRowsChange: (keys) => setExpandedTreeKeys(keys as string[])
+                          onExpandedRowsChange: (keys) => setExpandedTreeKeys(keys as string[]),
+                          expandRowByClick: true
                         }}
                       />
                    </div>
@@ -761,29 +1092,9 @@ const Dashboard: React.FC = () => {
           </Col>
         </Row>
         
-        {/* Row 3: Lifespan & Detail Analysis */}
+        {/* Row 3: Order Tracking */}
         <Row gutter={[24, 24]} className="mb-8">
-          <Col xs={24} lg={12}>
-             <GlassCard title="设备寿命健康度" icon={<BarChartOutlined />} className="h-full">
-               <ReactECharts option={barOption} style={{ height: '220px' }} />
-               <div className="mt-4 bg-orange-50 rounded-xl p-4 border border-orange-100 flex items-center justify-between">
-                 <div className="flex items-center gap-3">
-                   <div className="p-2 bg-orange-100 text-orange-600 rounded-full">
-                     <AlertOutlined />
-                   </div>
-                   <div>
-                     <div className="text-orange-900 font-bold">健康预警</div>
-                     <div className="text-orange-700/70 text-xs">发现 {lifespanStats.warningAssets.length} 台设备已超期</div>
-                   </div>
-                 </div>
-                 <Button size="small" type="primary" ghost danger onClick={() => handleExport(lifespanStats.warningAssets, '超期设备明细')}>
-                   查看详情
-                 </Button>
-               </div>
-             </GlassCard>
-          </Col>
-          
-          <Col xs={24} lg={12}>
+          <Col span={24}>
             <GlassCard 
               title="订单资产追踪" 
               icon={<FileTextOutlined />} 
@@ -803,6 +1114,16 @@ const Dashboard: React.FC = () => {
             >
                {orderStats ? (
                  <div className="space-y-6">
+                   <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-center gap-4">
+                      <div className="p-2 bg-white rounded-lg shadow-sm text-indigo-600">
+                        <ProjectOutlined />
+                      </div>
+                      <div>
+                        <div className="text-xs text-gray-500">所属项目</div>
+                        <div className="font-bold text-gray-800 text-lg">{orderStats.projectName}</div>
+                      </div>
+                   </div>
+
                    <div className="bg-gray-50 p-5 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-4 divide-x divide-gray-200/60">
                       <div className="text-center px-2">
                         <div className="text-xs text-gray-500 mb-1">订单总金额</div>
@@ -823,16 +1144,43 @@ const Dashboard: React.FC = () => {
                    </div>
 
                    <Table 
-                      dataSource={orderStats.filtered} 
+                      dataSource={orderStats.filtered.slice(0, 10)} 
                       rowKey="id"
-                      pagination={{ pageSize: 5, size: 'small', hideOnSinglePage: true }}
+                      pagination={false}
                       size="small"
+                      scroll={{ x: 600 }}
+                      footer={() => (
+                        <div className="flex justify-between items-center text-xs text-gray-400">
+                          <span>当前显示：{Math.min(10, orderStats.filtered.length)} / 总记录数：{orderStats.totalCount}</span>
+                          {orderStats.filtered.length > 10 && <span className="text-amber-500">仅展示前10条，更多请查看全部</span>}
+                        </div>
+                      )}
                       columns={[
-                        { title: '资产名称', dataIndex: 'name', render: t => <span className="font-medium text-gray-800 text-sm">{t}</span> },
-                        { title: '资产状态', dataIndex: 'status', render: (t) => getStatusBadge(t) },
-                        { title: '使用人', dataIndex: 'employee_name', render: t => t ? <span className="text-gray-500 text-sm"><UserOutlined className="mr-1"/>{t}</span> : <span className="text-gray-300">-</span> },
+                        { title: '资产编号', dataIndex: 'asset_code', width: 100, render: t => <span className="font-mono text-xs">{t}</span> },
+                        { title: '资产名称', dataIndex: 'name', width: 120, render: t => <span className="font-medium text-gray-800 text-sm">{t}</span> },
+                        { title: '资产状态', dataIndex: 'status', width: 80, render: (t) => getStatusBadge(t) },
+                        { title: '使用人/部门', dataIndex: 'employee_name', width: 120, render: (t, r) => (
+                           <span className="text-xs text-gray-500">
+                             {t ? <><UserOutlined className="mr-1"/>{t}</> : r.department_name || '-'}
+                           </span>
+                        )},
+                        { title: '最近更新', dataIndex: 'updated_at', width: 100, render: t => <span className="text-xs text-gray-400">{dayjs(t).format('MM-DD HH:mm')}</span> }
                       ]}
                     />
+                    
+                    <div className="text-center pt-2">
+                      <Button 
+                        type="dashed" 
+                        block 
+                        icon={<FullscreenOutlined />}
+                        onClick={() => {
+                          resetOrderAssetFilters();
+                          setViewAllModalVisible(true);
+                        }}
+                      >
+                        查看全部资产 ({orderStats.totalCount})
+                      </Button>
+                    </div>
                  </div>
                ) : <Empty description="请选择订单查看详情" className="my-10" />}
             </GlassCard>
@@ -848,7 +1196,7 @@ const Dashboard: React.FC = () => {
         </Col>
       </Row>
 
-      {/* Detail Modal */}
+      {/* Detail Modal (Pie Chart Drill Down) */}
       <Modal
         title={
           <div className="flex items-center gap-2">
@@ -862,63 +1210,223 @@ const Dashboard: React.FC = () => {
         }
         open={detailModalVisible}
         onCancel={() => setDetailModalVisible(false)}
-        width={1000}
+        width="80%"
+        style={{ top: 20 }}
         footer={null}
+        bodyStyle={{ height: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
       >
-        <div className="mb-4 flex justify-between items-center flex-wrap gap-4">
-          <Space>
-            <Input 
-              prefix={<SearchOutlined className="text-gray-400" />}
-              placeholder="搜索资产编号/序列号" 
-              value={detailSearchText}
-              onChange={e => setDetailSearchText(e.target.value)}
-              style={{ width: 240 }}
-              allowClear
-            />
-            <Select
-              placeholder="资产状态"
-              allowClear
-              style={{ width: 140 }}
-              value={detailStatusFilter}
-              onChange={setDetailStatusFilter}
-              options={[
-                { label: '在库', value: 'in_stock' },
-                { label: '在用', value: 'in_use' },
-                { label: '维修中', value: 'maintenance' },
-                { label: '已处置', value: 'disposed' },
-                { label: '已报废', value: 'scrapped' },
-              ]}
-            />
-          </Space>
-          <Button 
-            icon={<DownloadOutlined />} 
-            onClick={() => handleExport(getFilteredDetailList(), `${drillDownCategory}_${selectedSlice?.name}_资产清单`)}
-          >
-            导出列表
-          </Button>
+        <div className="flex-shrink-0 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-100">
+           <Row gutter={[16, 16]}>
+             <Col xs={24} sm={12} md={6}>
+               <Input 
+                 prefix={<SearchOutlined className="text-gray-400" />}
+                 placeholder="搜索编号/名称/责任人" 
+                 value={detailFilters.keyword}
+                 onChange={e => setDetailFilters({...detailFilters, keyword: e.target.value})}
+                 allowClear
+               />
+             </Col>
+             <Col xs={24} sm={12} md={5}>
+               <Select
+                 mode="multiple"
+                 placeholder="资产状态"
+                 className="w-full"
+                 value={detailFilters.status}
+                 onChange={vals => setDetailFilters({...detailFilters, status: vals})}
+                 maxTagCount="responsive"
+                 options={[
+                   { label: '在库', value: 'in_stock' },
+                   { label: '在用', value: 'in_use' },
+                   { label: '维修中', value: 'maintenance' },
+                   { label: '已处置', value: 'disposed' },
+                   { label: '已报废', value: 'scrapped' },
+                 ]}
+               />
+             </Col>
+             <Col xs={24} sm={12} md={7}>
+               <RangePicker 
+                 className="w-full"
+                 placeholder={['入库开始', '入库结束']}
+                 onChange={(dates) => setDetailFilters({...detailFilters, dateRange: dates})}
+               />
+             </Col>
+             <Col xs={24} sm={12} md={6}>
+               <div className="flex gap-2 justify-end">
+                  <Button onClick={resetDetailFilters} icon={<ReloadOutlined />}>重置</Button>
+                  <Button 
+                    type="primary"
+                    icon={<ExportOutlined />} 
+                    onClick={() => handleExport(getFilteredDetailList(), `${drillDownCategory}_${selectedSlice?.name}_资产清单`)}
+                  >
+                    导出
+                  </Button>
+               </div>
+             </Col>
+           </Row>
         </div>
 
-        <Table
-          dataSource={getFilteredDetailList()}
-          rowKey="id"
-          size="middle"
-          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
-          columns={[
-            { title: '资产编号', dataIndex: 'asset_code', width: 120, render: t => <span className="font-mono">{t}</span> },
-            { title: '序列号', dataIndex: 'serial_number', width: 120, render: t => t || '-' },
-            { title: '设备名称', dataIndex: 'name', width: 150 },
-            { title: '型号', dataIndex: 'model', width: 120, render: t => t || '-' },
-            { title: '状态', dataIndex: 'status', width: 100, render: t => getStatusBadge(t) },
-            { title: '所属部门', dataIndex: 'department_name', width: 140, render: t => t || '-' },
-            { 
-              title: '入库时间', 
-              dataIndex: 'arrival_date', // Or created_at if arrival_date is often null
-              width: 120,
-              sorter: (a, b) => dayjs(a.arrival_date || a.created_at).unix() - dayjs(b.arrival_date || b.created_at).unix(),
-              render: (t, r) => t ? dayjs(t).format('YYYY-MM-DD') : (r.created_at ? dayjs(r.created_at).format('YYYY-MM-DD') : '-') 
-            },
-          ]}
-        />
+        <div className="flex-1 overflow-auto">
+          <Table
+            dataSource={getFilteredDetailList()}
+            rowKey="id"
+            size="middle"
+            pagination={{ 
+              pageSize: 20, 
+              showSizeChanger: true, 
+              showTotal: (total) => `共 ${total} 条记录`,
+              position: ['bottomRight']
+            }}
+            sticky
+            scroll={{ x: 1300, y: 'calc(70vh - 140px)' }}
+            columns={[
+               { 
+                 title: '资产编号', 
+                 dataIndex: 'asset_code', 
+                 width: 120, 
+                 fixed: 'left', 
+                 render: t => <span className="font-mono font-bold">{t}</span> 
+               },
+               { 
+                 title: '资产名称', 
+                 dataIndex: 'name', 
+                 width: 150, 
+                 fixed: 'left', 
+                 render: t => <span className="font-medium">{t}</span> 
+               },
+               { title: '序列号', dataIndex: 'serial_number', width: 120, render: t => t || '-' },
+              { title: '型号', dataIndex: 'model', width: 120, render: t => t || '-' },
+              { title: '状态', dataIndex: 'status', width: 100, render: t => getStatusBadge(t) },
+              { title: '所属部门', dataIndex: 'department_name', width: 120, render: t => t || '-' },
+              { title: '责任人', dataIndex: 'employee_name', width: 100, render: t => t || '-' },
+              { 
+                title: '入库时间', 
+                dataIndex: 'arrival_date', 
+                width: 120,
+                sorter: (a, b) => dayjs(a.arrival_date || a.created_at).unix() - dayjs(b.arrival_date || b.created_at).unix(),
+                render: (t, r) => t ? dayjs(t).format('YYYY-MM-DD') : (r.created_at ? dayjs(r.created_at).format('YYYY-MM-DD') : '-') 
+              },
+              { title: '资产价值', dataIndex: 'purchase_price', width: 120, align: 'right', sorter: (a, b) => (a.purchase_price || 0) - (b.purchase_price || 0), render: t => t ? `¥ ${Number(t).toLocaleString()}` : '-' },
+              { title: '位置', key: 'location', width: 180, render: (_, r) => [r.location, r.specific_location].filter(Boolean).join(' - ') || '-' },
+            ]}
+          />
+        </div>
+      </Modal>
+
+      {/* View All Order Assets Modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <ProjectOutlined className="text-indigo-600" />
+            <span className="font-bold text-gray-800">项目资产全量列表 - {orderStats?.projectName}</span>
+          </div>
+        }
+        open={viewAllModalVisible}
+        onCancel={() => setViewAllModalVisible(false)}
+        width="80%"
+        style={{ top: 20 }}
+        footer={null}
+        bodyStyle={{ height: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+      >
+        <div className="flex-shrink-0 mb-4 bg-gray-50 p-4 rounded-lg border border-gray-100">
+           <Row gutter={[16, 16]}>
+             <Col xs={24} sm={12} md={6}>
+               <Input 
+                 placeholder="搜索编号/名称/责任人" 
+                 prefix={<SearchOutlined className="text-gray-400" />}
+                 value={orderAssetFilters.keyword}
+                 onChange={e => setOrderAssetFilters({...orderAssetFilters, keyword: e.target.value})}
+                 allowClear
+               />
+             </Col>
+             <Col xs={24} sm={12} md={4}>
+               <Select
+                 mode="multiple"
+                 placeholder="资产状态"
+                 className="w-full"
+                 value={orderAssetFilters.status}
+                 onChange={vals => setOrderAssetFilters({...orderAssetFilters, status: vals})}
+                 maxTagCount="responsive"
+                 options={[
+                   { label: '在库', value: 'in_stock' },
+                   { label: '在用', value: 'in_use' },
+                   { label: '维修中', value: 'maintenance' },
+                   { label: '已处置', value: 'disposed' },
+                   { label: '已报废', value: 'scrapped' },
+                 ]}
+               />
+             </Col>
+             <Col xs={24} sm={12} md={4}>
+               <Select
+                 mode="multiple"
+                 placeholder="资产类型"
+                 className="w-full"
+                 value={orderAssetFilters.type}
+                 onChange={vals => setOrderAssetFilters({...orderAssetFilters, type: vals})}
+                 maxTagCount="responsive"
+                 options={categories.map(c => ({ label: c.name, value: c.name }))}
+               />
+             </Col>
+             <Col xs={24} sm={12} md={6}>
+               <RangePicker 
+                 className="w-full"
+                 placeholder={['入库开始', '入库结束']}
+                 onChange={(dates) => setOrderAssetFilters({...orderAssetFilters, dateRange: dates})}
+               />
+             </Col>
+             <Col xs={24} sm={12} md={4}>
+               <div className="flex gap-2">
+                  <Button onClick={resetOrderAssetFilters} icon={<ReloadOutlined />}>重置</Button>
+                  <Button 
+                    type="primary" 
+                    icon={<ExportOutlined />} 
+                    onClick={() => handleExport(filteredOrderAssets, `${orderStats?.projectName || '项目'}_资产清单`)}
+                  >
+                    导出
+                  </Button>
+               </div>
+             </Col>
+           </Row>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+           <Table
+              dataSource={filteredOrderAssets}
+              rowKey="id"
+              size="middle"
+              pagination={{ 
+                pageSize: 20, 
+                showSizeChanger: true, 
+                showTotal: (total) => `共 ${total} 条记录`,
+                position: ['bottomRight']
+              }}
+              sticky
+              scroll={{ x: 1300, y: 'calc(70vh - 140px)' }}
+              columns={[
+                 { 
+                   title: '资产编号', 
+                   dataIndex: 'asset_code', 
+                   width: 120, 
+                   fixed: 'left', 
+                   render: t => <span className="font-mono font-bold">{t}</span> 
+                 },
+                 { 
+                   title: '资产名称', 
+                   dataIndex: 'name', 
+                   width: 150, 
+                   fixed: 'left', 
+                   render: t => <span className="font-medium">{t}</span> 
+                 },
+                 { title: '资产类型', dataIndex: ['category', 'name'], width: 100, render: t => <Tag>{t || '其他'}</Tag> },
+                { title: '状态', dataIndex: 'status', width: 100, render: t => getStatusBadge(t) },
+                { title: '责任人', dataIndex: 'employee_name', width: 100, render: t => t || '-' },
+                { title: '所属部门', dataIndex: 'department_name', width: 120, render: t => t || '-' },
+                { title: '入库时间', dataIndex: 'arrival_date', width: 120, sorter: (a, b) => dayjs(a.arrival_date).unix() - dayjs(b.arrival_date).unix(), render: t => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
+                { title: '更新时间', dataIndex: 'updated_at', width: 150, sorter: (a, b) => dayjs(a.updated_at).unix() - dayjs(b.updated_at).unix(), render: t => dayjs(t).format('YYYY-MM-DD HH:mm') },
+                { title: '资产价值', dataIndex: 'purchase_price', width: 120, align: 'right', sorter: (a, b) => (a.purchase_price || 0) - (b.purchase_price || 0), render: t => t ? `¥ ${Number(t).toLocaleString()}` : '-' },
+                { title: '位置', key: 'location', width: 180, render: (_, r) => [r.location, r.specific_location].filter(Boolean).join(' - ') || '-' },
+              ]}
+           />
+        </div>
       </Modal>
 
       {/* Row 4: Operations */}
@@ -1026,12 +1534,29 @@ const Dashboard: React.FC = () => {
           font-weight: 600;
           border-bottom: 1px solid #f3f4f6;
         }
+        /* Ensure fixed columns have background to prevent overlap transparency */
+        .ant-table-wrapper .ant-table-thead > tr > th.ant-table-cell-fix-left,
+        .ant-table-wrapper .ant-table-thead > tr > th.ant-table-cell-fix-right {
+          background: #f8fafc !important; /* Match hover/header bg */
+          z-index: 20; /* Ensure header fixed cols are above body fixed cols if needed */
+        }
+        .ant-table-wrapper .ant-table-tbody > tr > td.ant-table-cell-fix-left,
+        .ant-table-wrapper .ant-table-tbody > tr > td.ant-table-cell-fix-right {
+          background: #ffffff !important;
+        }
+        
         .ant-table-wrapper .ant-table-tbody > tr > td {
           border-bottom: 1px solid #f9fafb;
         }
         .ant-table-wrapper .ant-table-tbody > tr:hover > td {
           background: #f8fafc !important;
         }
+        /* Ensure fixed columns also get hover color */
+        .ant-table-wrapper .ant-table-tbody > tr:hover > td.ant-table-cell-fix-left,
+        .ant-table-wrapper .ant-table-tbody > tr:hover > td.ant-table-cell-fix-right {
+           background: #f8fafc !important;
+        }
+
         .no-border-table .ant-table-thead > tr > th,
         .no-border-table .ant-table-tbody > tr > td {
           border-bottom: none !important;
