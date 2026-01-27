@@ -257,13 +257,6 @@ const AssetForm: React.FC = () => {
               />
             </Form.Item>
 
-            <Form.Item
-              name="purchase_date"
-              label="入账时间"
-            >
-              <DatePicker style={{ width: '100%' }} />
-            </Form.Item>
-
             <Form.Item label="已使用月数">
               <Input 
                 value={`${calculateMonthsUsed()}个月`} 

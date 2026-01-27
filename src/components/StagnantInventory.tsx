@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, DatePicker, Button, Table, Tag, Space, InputNumber, message, Empty } from 'antd';
+import { Card, DatePicker, Button, Table, Tag, Space, InputNumber, message, Empty, Radio } from 'antd';
 import { DownloadOutlined, HistoryOutlined, CalendarOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
 import { Asset } from '../types';
@@ -8,11 +8,14 @@ import * as XLSX from 'xlsx';
 
 const { RangePicker } = DatePicker;
 
+type TimeRangeType = 'days' | 'custom';
+
 interface StagnantInventoryProps {
   className?: string;
 }
 
 const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' }) => {
+  const [timeRangeType, setTimeRangeType] = useState<TimeRangeType>('days');
   const [stagnantDays, setStagnantDays] = useState<number>(90);
   const [stagnantAssets, setStagnantAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -32,7 +35,7 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
       let startDate: dayjs.Dayjs;
       let endDate: dayjs.Dayjs;
 
-      if (customDateRange) {
+      if (timeRangeType === 'custom' && customDateRange) {
         startDate = customDateRange[0];
         endDate = customDateRange[1];
       } else {
@@ -46,7 +49,7 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
         .select(`
           *,
           category:categories(name),
-          flows:asset_flows(
+          flows:asset_flow_records(
             id,
             operation_type,
             operation_time,
@@ -113,7 +116,7 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '呆滞库存清单');
     
-    const fileName = customDateRange 
+    const fileName = timeRangeType === 'custom' && customDateRange 
       ? `呆滞库存_${customDateRange[0].format('YYYYMMDD')}_${customDateRange[1].format('YYYYMMDD')}`
       : `呆滞库存_${stagnantDays}天`;
     
@@ -124,10 +127,18 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
   // 表格列定义
   const columns = [
     {
+      title: '项目',
+      dataIndex: 'project_name',
+      key: 'project_name',
+      ellipsis: true,
+      width: '15%',
+      render: (text: string) => <span className="font-bold text-gray-800">{text || '-'}</span>,
+    },
+    {
       title: '资产编号',
       dataIndex: 'asset_code',
       key: 'asset_code',
-      width: 120,
+      width: '15%',
       render: (text: string) => <span className="font-mono text-gray-600 text-sm">{text}</span>,
     },
     {
@@ -135,20 +146,21 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
       dataIndex: 'name',
       key: 'name',
       ellipsis: true,
+      width: '20%',
       render: (text: string) => <span className="font-medium text-gray-800">{text}</span>,
     },
     {
       title: '品类',
       dataIndex: ['category', 'name'],
       key: 'category',
-      width: 100,
+      width: '10%',
       render: (text: string) => <Tag color="blue">{text || '-'}</Tag>,
     },
     {
       title: '采购价格',
       dataIndex: 'purchase_price',
       key: 'purchase_price',
-      width: 100,
+      width: '10%',
       align: 'right' as const,
       render: (value: number) => (
         <span className="font-medium text-gray-700">
@@ -157,28 +169,28 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
       ),
     },
     {
-      title: '采购日期',
-      dataIndex: 'purchase_date',
-      key: 'purchase_date',
-      width: 110,
-      render: (date: string) => (
-        <span className="text-gray-600 text-sm">
-          {date ? dayjs(date).format('YYYY-MM-DD') : '-'}
-        </span>
-      ),
-    },
-    {
-      title: '项目',
-      dataIndex: 'project_name',
-      key: 'project_name',
-      ellipsis: true,
-      render: (text: string) => <span className="text-gray-600 text-sm">{text || '-'}</span>,
+      title: '呆滞天数',
+      key: 'stagnant_days',
+      width: '10%',
+      render: (_: any, record: Asset) => {
+        // Calculate stagnant days: now - (last flow time OR purchase date)
+        const lastActivityTime = record.last_record 
+          ? dayjs(record.last_record) 
+          : (record.purchase_date ? dayjs(record.purchase_date) : dayjs(record.created_at));
+        
+        const days = dayjs().diff(lastActivityTime, 'day');
+        return (
+          <Tag color="orange">
+            {Math.max(0, days)} 天
+          </Tag>
+        );
+      },
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 80,
+      width: '10%',
       align: 'center' as const,
       render: (status: string) => (
         <Tag color={status === 'in_stock' ? 'green' : 'default'}>
@@ -190,7 +202,7 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
 
   useEffect(() => {
     fetchStagnantAssets();
-  }, [stagnantDays, customDateRange]);
+  }, [stagnantDays, customDateRange, timeRangeType]);
 
   return (
     <Card
@@ -204,30 +216,39 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
       className={`shadow-lg rounded-2xl ${className}`}
       extra={
         <Space size="middle">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-600">呆滞天数:</span>
-            <InputNumber
-              min={1}
-              max={3650}
-              value={stagnantDays}
-              onChange={(value) => {
-                setStagnantDays(value || 90);
-                setCustomDateRange(null);
-              }}
-              style={{ width: 80 }}
-              placeholder="天数"
-            />
-            <span className="text-gray-500 text-sm">天</span>
-          </div>
+          <Radio.Group 
+            value={timeRangeType} 
+            onChange={(e) => setTimeRangeType(e.target.value)}
+            buttonStyle="solid"
+            size="small"
+          >
+            <Radio.Button value="days">按天数</Radio.Button>
+            <Radio.Button value="custom">自定义日期</Radio.Button>
+          </Radio.Group>
           
-          <RangePicker
-            value={customDateRange}
-            onChange={(dates) => {
-              setCustomDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs]);
-            }}
-            placeholder={['开始日期', '结束日期']}
-            style={{ width: 240 }}
-          />
+          {timeRangeType === 'days' ? (
+            <div className="flex items-center gap-2">
+              <span className="text-gray-600">呆滞天数:</span>
+              <InputNumber
+                min={1}
+                max={3650}
+                value={stagnantDays}
+                onChange={(value) => setStagnantDays(value || 90)}
+                style={{ width: 80 }}
+                placeholder="天数"
+                size="small"
+              />
+              <span className="text-gray-500 text-sm">天</span>
+            </div>
+          ) : (
+            <RangePicker
+              value={customDateRange}
+              onChange={(dates) => setCustomDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs])}
+              placeholder={['开始日期', '结束日期']}
+              style={{ width: 240 }}
+              size="small"
+            />
+          )}
           
           <Button
             type="primary"
@@ -235,6 +256,7 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
             onClick={handleExport}
             loading={loading}
             className="flex items-center"
+            size="small"
           >
             导出
           </Button>

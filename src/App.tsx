@@ -19,8 +19,9 @@ const RoleManagementPage = lazy(() => import('./pages/RoleManagementPage'));
 
 // Loading Fallback
 const PageLoading = () => (
-  <div className="h-screen w-full flex items-center justify-center bg-gray-50">
-    <Spin size="large" tip="系统加载中..." />
+  <div className="h-screen w-full flex flex-col items-center justify-center bg-gray-50 gap-4">
+    <Spin size="large" />
+    <span className="text-gray-500 font-medium">系统加载中...</span>
   </div>
 );
 

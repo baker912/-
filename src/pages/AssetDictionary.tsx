@@ -35,6 +35,7 @@ interface DictionaryItem {
   attachment?: string;
   images?: string[];
   usage_years?: number;
+  warranty_period?: number;
 }
 
 const AssetDictionary: React.FC = () => {
@@ -710,6 +711,20 @@ const AssetDictionary: React.FC = () => {
                     precision={2}
                     disabled 
                     className="bg-gray-50"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="warranty_period"
+                  label="质保年限"
+                  rules={[{ required: true, message: '请输入质保年限' }]}
+                >
+                  <InputNumber 
+                    style={{ width: '100%' }} 
+                    min={0}
+                    placeholder="请输入年限"
+                    addonAfter="年"
                   />
                 </Form.Item>
               </Col>

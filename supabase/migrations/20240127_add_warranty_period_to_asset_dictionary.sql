@@ -1,0 +1,1 @@
+alter table asset_dictionary add column warranty_period numeric;

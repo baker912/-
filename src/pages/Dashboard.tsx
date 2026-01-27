@@ -2,9 +2,11 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Row, Col, Statistic, Button, Spin, Select, Table, Tag, 
   message, Space, Divider, Tooltip, Empty, Progress, Avatar, Radio, DatePicker,
-  InputNumber, Modal
+  InputNumber, Modal, Input
 } from 'antd';
 import { 
+  SearchOutlined,
+  FilterOutlined,
   ShoppingOutlined, 
   DollarOutlined, 
   SyncOutlined,
@@ -48,6 +50,16 @@ interface AssetFlowRecord {
     name: string;
     purchase_price?: number;
   };
+}
+
+interface DistributionNode {
+  key: string;
+  name: string;
+  type: 'category' | 'brand' | 'model';
+  count: number;
+  totalValue: number;
+  inUseCount: number;
+  children?: DistributionNode[];
 }
 
 // --- Components ---
@@ -124,9 +136,18 @@ const Dashboard: React.FC = () => {
   const [flowTimeRange, setFlowTimeRange] = useState<string>('week'); // week, month, all, custom
   const [customDateRange, setCustomDateRange] = useState<any>(null);
 
-  // Stagnant Inventory State
-  const [stagnantDays, setStagnantDays] = useState<number>(90);
-  const [isStagnantModalOpen, setIsStagnantModalOpen] = useState(false);
+  // Drill Down State
+  const [drillDownCategory, setDrillDownCategory] = useState<string | null>(null);
+  const [drillDownType, setDrillDownType] = useState<'brand' | 'model'>('brand');
+  const [expandedTreeKeys, setExpandedTreeKeys] = useState<string[]>([]);
+  
+  // Detail Modal State
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [selectedSlice, setSelectedSlice] = useState<{ name: string, type: 'brand' | 'model' } | null>(null);
+  const [detailSearchText, setDetailSearchText] = useState('');
+  const [detailStatusFilter, setDetailStatusFilter] = useState<string | null>(null);
+
+  // Stagnant Inventory State removed as it is now a separate component
 
   useEffect(() => {
     fetchData();
@@ -138,7 +159,7 @@ const Dashboard: React.FC = () => {
       // 1. Fetch Assets first (Lightweight query)
       const { data: assetsData, error: assetsError } = await supabase
         .from('assets')
-        .select('id, status, purchase_price, purchase_date, purchase_order, project_name, name, asset_code, employee_name, updated_at, category:categories(name)');
+        .select('id, status, purchase_price, purchase_date, purchase_order, project_name, name, asset_code, employee_name, updated_at, brand, model, serial_number, department_name, arrival_date, category:categories(name)');
       
       if (assetsError) throw assetsError;
       
@@ -201,6 +222,114 @@ const Dashboard: React.FC = () => {
     return { totalCount, totalValue, inUseCount, inStockCount, categoryData };
   }, [assets]);
 
+  // Drill Down Stats: Group by Brand or Model for selected category
+  const drillDownStats = useMemo(() => {
+    if (!drillDownCategory) return null;
+
+    const filtered = assets.filter(a => (a.category?.name || '其他') === drillDownCategory);
+    
+    // Group by Brand
+    const brandData = filtered.reduce((acc, asset: any) => {
+      const brandName = asset.brand || '未知品牌';
+      if (!acc[brandName]) acc[brandName] = 0;
+      acc[brandName] += 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    // Group by Model
+    const modelData = filtered.reduce((acc, asset: any) => {
+      const modelName = asset.model || '未知型号';
+      if (!acc[modelName]) acc[modelName] = 0;
+      acc[modelName] += 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return { brandData, modelData, totalCount: filtered.length };
+  }, [assets, drillDownCategory]);
+
+  // Hierarchical Data for Tree Table
+  const distributionTreeData = useMemo(() => {
+    const tree: DistributionNode[] = [];
+    const categoryMap = new Map<string, DistributionNode>();
+
+    assets.forEach(asset => {
+      const catName = asset.category?.name || '其他';
+      const brandName = asset.brand || '未知品牌';
+      const modelName = asset.model || '未知型号';
+      const price = asset.purchase_price || 0;
+      const isInUse = asset.status === 'in_use';
+
+      // 1. Category Level
+      let catNode = categoryMap.get(catName);
+      if (!catNode) {
+        catNode = {
+          key: `cat_${catName}`,
+          name: catName,
+          type: 'category',
+          count: 0,
+          totalValue: 0,
+          inUseCount: 0,
+          children: []
+        };
+        categoryMap.set(catName, catNode);
+        tree.push(catNode);
+      }
+      catNode.count++;
+      catNode.totalValue += price;
+      if (isInUse) catNode.inUseCount++;
+
+      // 2. Second Level (Brand or Model based on drillDownType)
+      // Note: We need to support dynamic switching. 
+      // Instead of hardcoding Brand -> Model hierarchy, we construct the tree based on current `drillDownType`.
+      // BUT `distributionTreeData` should probably be stable or re-compute when type changes.
+      // Let's make the second level dynamic.
+      
+      const secondLevelName = drillDownType === 'brand' ? brandName : modelName;
+      const secondLevelType = drillDownType === 'brand' ? 'brand' : 'model';
+      const secondLevelKey = `${drillDownType}_${catName}_${secondLevelName}`;
+
+      let secondNode = catNode.children?.find(c => c.name === secondLevelName);
+      if (!secondNode) {
+        secondNode = {
+          key: secondLevelKey,
+          name: secondLevelName,
+          type: secondLevelType,
+          count: 0,
+          totalValue: 0,
+          inUseCount: 0,
+          children: []
+        };
+        catNode.children?.push(secondNode);
+      }
+      secondNode.count++;
+      secondNode.totalValue += price;
+      if (isInUse) secondNode.inUseCount++;
+
+      // 3. Third Level (The other one)
+      const thirdLevelName = drillDownType === 'brand' ? modelName : brandName;
+      const thirdLevelType = drillDownType === 'brand' ? 'model' : 'brand';
+      const thirdLevelKey = `${thirdLevelType}_${catName}_${secondLevelName}_${thirdLevelName}`;
+
+      let thirdNode = secondNode.children?.find(c => c.name === thirdLevelName);
+      if (!thirdNode) {
+        thirdNode = {
+          key: thirdLevelKey,
+          name: thirdLevelName,
+          type: thirdLevelType,
+          count: 0,
+          totalValue: 0,
+          inUseCount: 0
+        };
+        secondNode.children?.push(thirdNode);
+      }
+      thirdNode.count++;
+      thirdNode.totalValue += price;
+      if (isInUse) thirdNode.inUseCount++;
+    });
+
+    return tree;
+  }, [assets, drillDownType]); // Re-compute when drillDownType changes
+
   const categoryStats = useMemo(() => {
     if (!selectedCategory) return null;
     const filtered = assets.filter(a => a.category?.name === selectedCategory);
@@ -262,25 +391,6 @@ const Dashboard: React.FC = () => {
     return { candidates, totalCount: candidates.length, totalValue };
   }, [assets]);
 
-  const stagnantStats = useMemo(() => {
-    const now = dayjs();
-    const thresholdDate = now.subtract(stagnantDays, 'day');
-    
-    const candidates = assets.filter(a => {
-      // Only consider in-stock assets
-      if (a.status !== 'in_stock') return false;
-      
-      // Check updated_at (assuming it reflects last activity)
-      // If updated_at is null (legacy data), maybe check created_at or assume stagnant
-      const lastActive = a.updated_at ? dayjs(a.updated_at) : (a.created_at ? dayjs(a.created_at) : now);
-      
-      return lastActive.isBefore(thresholdDate);
-    });
-
-    const totalValue = candidates.reduce((sum, a) => sum + (a.purchase_price || 0), 0);
-    return { candidates, totalCount: candidates.length, totalValue };
-  }, [assets, stagnantDays]);
-
   // --- Export ---
   const handleExport = (data: any[], filename: string) => {
     if (!data || data.length === 0) {
@@ -296,23 +406,110 @@ const Dashboard: React.FC = () => {
   // --- ECharts Options ---
   const colors = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 
-  const pieOption = useMemo(() => ({
-    color: colors,
-    tooltip: { trigger: 'item', backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 8, padding: 12, textStyle: { color: '#333' } },
-    legend: { bottom: '0%', left: 'center', icon: 'circle' },
-    series: [{
-      name: '资产分类',
-      type: 'pie',
-      radius: ['45%', '70%'],
-      center: ['50%', '45%'],
-      avoidLabelOverlap: false,
-      itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
-      label: { show: true, position: 'outside', formatter: '{b}: {c} ({d}%)' },
-      emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } },
-      labelLine: { show: true },
-      data: Object.entries(overviewStats.categoryData).map(([name, value]) => ({ name, value }))
-    }]
-  }), [overviewStats]);
+  const pieOption = useMemo(() => {
+    // If drilling down, show brand or model distribution based on selection
+    if (drillDownCategory && drillDownStats) {
+      const dataMap = drillDownType === 'brand' ? drillDownStats.brandData : drillDownStats.modelData;
+      const typeLabel = drillDownType === 'brand' ? '品牌' : '型号';
+
+      return {
+        color: colors,
+        tooltip: { trigger: 'item', backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 8, padding: 12, textStyle: { color: '#333' } },
+        legend: { bottom: '0%', left: 'center', icon: 'circle' },
+        series: [{
+          name: `${drillDownCategory} - ${typeLabel}分布`,
+          type: 'pie',
+          radius: ['45%', '70%'],
+          center: ['50%', '45%'],
+          avoidLabelOverlap: false,
+          itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+          label: { show: true, position: 'outside', formatter: '{b}: {c} ({d}%)' },
+          emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } },
+          labelLine: { show: true },
+          data: Object.entries(dataMap).map(([name, value]) => ({ name, value }))
+        }]
+      };
+    }
+
+    // Default: Category distribution
+    return {
+      color: colors,
+      tooltip: { trigger: 'item', backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 8, padding: 12, textStyle: { color: '#333' } },
+      legend: { bottom: '0%', left: 'center', icon: 'circle' },
+      series: [{
+        name: '资产分类',
+        type: 'pie',
+        radius: ['45%', '70%'],
+        center: ['50%', '45%'],
+        avoidLabelOverlap: false,
+        itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 2 },
+        label: { show: true, position: 'outside', formatter: '{b}: {c} ({d}%)' },
+        emphasis: { label: { show: true, fontSize: 18, fontWeight: 'bold', color: '#333' } },
+        labelLine: { show: true },
+        data: Object.entries(overviewStats.categoryData).map(([name, value]) => ({ name, value }))
+      }]
+    };
+  }, [overviewStats, drillDownCategory, drillDownStats]);
+
+  const onPieClick = (e: any) => {
+    // If currently at top level, drill down to Category -> Brand (default)
+    if (!drillDownCategory) {
+      setDrillDownCategory(e.name);
+      setDrillDownType('brand'); // Default to brand
+      setExpandedTreeKeys([`cat_${e.name}`]); // Auto expand the selected category
+    } else {
+      // If already drilled down, show detail modal for the selected slice
+      setSelectedSlice({
+        name: e.name,
+        type: drillDownType
+      });
+      setDetailModalVisible(true);
+      setDetailSearchText('');
+      setDetailStatusFilter(null);
+    }
+  };
+
+  const getFilteredDetailList = () => {
+    if (!selectedSlice || !drillDownCategory) return [];
+
+    return assets.filter(asset => {
+      // 1. Filter by Category
+      const assetCategory = asset.category?.name || '其他';
+      if (assetCategory !== drillDownCategory) return false;
+
+      // 2. Filter by Brand/Model (Slice)
+      const assetSliceValue = selectedSlice.type === 'brand' 
+        ? (asset.brand || '未知品牌') 
+        : (asset.model || '未知型号');
+      if (assetSliceValue !== selectedSlice.name) return false;
+
+      // 3. Search Filter
+      if (detailSearchText) {
+        const searchLower = detailSearchText.toLowerCase();
+        const matchesCode = asset.asset_code?.toLowerCase().includes(searchLower);
+        const matchesSerial = asset.serial_number?.toLowerCase().includes(searchLower);
+        if (!matchesCode && !matchesSerial) return false;
+      }
+
+      // 4. Status Filter
+      if (detailStatusFilter) {
+        if (asset.status !== detailStatusFilter) return false;
+      }
+
+      return true;
+    });
+  };
+
+  const filteredTreeData = useMemo(() => {
+    if (!drillDownCategory) return distributionTreeData;
+    
+    // Find the node corresponding to the selected category
+    const catNode = distributionTreeData.find(node => node.name === drillDownCategory);
+    if (!catNode) return [];
+
+    // Return the category node (it will be expanded by expandedRowKeys)
+    return [catNode];
+  }, [distributionTreeData, drillDownCategory]);
 
   const barOption = useMemo(() => ({
     color: ['#6366f1'],
@@ -430,16 +627,143 @@ const Dashboard: React.FC = () => {
           </Col>
         </Row>
 
-        {/* Row 2: Charts Area */}
+        {/* Row 2: Charts Area (Full Width Distribution & Analysis) */}
         <Row gutter={[24, 24]} className="mb-8">
-          <Col xs={24} lg={14}>
-             <GlassCard title="资产分布概览" icon={<PieChartOutlined />} className="h-full">
-               <div className="flex items-center justify-center h-full min-h-[280px]">
-                 <ReactECharts option={pieOption} style={{ height: '300px', width: '100%' }} />
-               </div>
+          <Col span={24}>
+             <GlassCard 
+               title={
+                 <div className="flex items-center gap-4">
+                    <span>{drillDownCategory ? `${drillDownCategory} 分布详情` : "资产分布概览 & 深度统计"}</span>
+                    {drillDownCategory && (
+                      <Radio.Group 
+                        value={drillDownType} 
+                        onChange={e => setDrillDownType(e.target.value)}
+                        size="small"
+                        buttonStyle="solid"
+                      >
+                        <Radio.Button value="brand">按品牌</Radio.Button>
+                        <Radio.Button value="model">按型号</Radio.Button>
+                      </Radio.Group>
+                    )}
+                 </div>
+               }
+               icon={<PieChartOutlined />} 
+               className="h-full"
+               extra={
+                  drillDownCategory && (
+                    <Button 
+                      size="small" 
+                      onClick={() => setDrillDownCategory(null)}
+                      icon={<HistoryOutlined />}
+                    >
+                      返回全部分类
+                    </Button>
+                  )
+               }
+             >
+               <Row gutter={[24, 24]}>
+                 <Col xs={24} lg={10} xl={8}>
+                   <div className="flex flex-col h-full min-h-[400px]">
+                      <div className="flex-1 flex items-center justify-center relative">
+                        {/* Center Text for Total if needed, or just Legend */}
+                        <ReactECharts 
+                            option={pieOption} 
+                            style={{ height: '360px', width: '100%', cursor: 'pointer' }} 
+                            onEvents={{
+                              'click': onPieClick
+                            }}
+                        />
+                      </div>
+                      <div className="text-center mt-2">
+                        <div className={`text-sm font-medium ${drillDownCategory ? 'text-indigo-600' : 'text-gray-500'}`}>
+                           {drillDownCategory ? '👆 点击扇区查看资产清单' : '👆 点击扇区钻取至详细分类'}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">图表与右侧表格联动交互</div>
+                      </div>
+                   </div>
+                 </Col>
+                 <Col xs={24} lg={14} xl={16}>
+                   <div className="h-full border-l border-gray-100 pl-6">
+                      <div className="mb-4 flex justify-between items-center">
+                         <h4 className="font-bold text-gray-700 m-0">多维资产统计报表</h4>
+                         <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded">
+                            分类 &gt; {drillDownType === 'brand' ? '品牌' : '型号'} &gt; {drillDownType === 'brand' ? '型号' : '品牌'}
+                         </span>
+                       </div>
+                      <Table
+                        columns={[
+                          { 
+                            title: '名称', 
+                            dataIndex: 'name', 
+                            key: 'name',
+                            width: '30%',
+                            render: (text, record) => (
+                              <span className={`
+                                ${record.type === 'category' ? 'font-bold text-gray-800' : ''}
+                                ${record.type === 'brand' ? 'font-medium text-gray-600' : ''}
+                                ${record.type === 'model' ? 'text-gray-500 text-sm' : ''}
+                              `}>
+                                {text}
+                              </span>
+                            )
+                          },
+                          { 
+                            title: '数量', 
+                            dataIndex: 'count', 
+                            key: 'count', 
+                            align: 'right',
+                            width: '15%',
+                            sorter: (a, b) => a.count - b.count,
+                            render: (v) => <span className="font-medium">{v}</span>
+                          },
+                          { 
+                            title: '总价值', 
+                            dataIndex: 'totalValue', 
+                            key: 'totalValue', 
+                            align: 'right',
+                            width: '25%',
+                            sorter: (a, b) => a.totalValue - b.totalValue,
+                            render: (v) => <span className="font-mono">¥ {v.toLocaleString()}</span>
+                          },
+                          { 
+                            title: '利用率', 
+                            key: 'utilization',
+                            width: '30%',
+                            render: (_, record) => {
+                              const percent = record.count > 0 ? (record.inUseCount / record.count) * 100 : 0;
+                              return (
+                                <div className="w-full flex items-center gap-2">
+                                  <Progress 
+                                    percent={parseFloat(percent.toFixed(1))} 
+                                    size="small" 
+                                    strokeColor={percent > 80 ? '#10b981' : percent > 50 ? '#3b82f6' : '#f59e0b'}
+                                    trailColor="#f3f4f6"
+                                  />
+                                </div>
+                              );
+                            }
+                          },
+                        ]}
+                        dataSource={filteredTreeData}
+                        pagination={false}
+                        size="small"
+                        scroll={{ y: 400 }}
+                        className="custom-tree-table"
+                        expandable={{
+                          expandedRowKeys: expandedTreeKeys,
+                          onExpandedRowsChange: (keys) => setExpandedTreeKeys(keys as string[])
+                        }}
+                      />
+                   </div>
+                 </Col>
+               </Row>
              </GlassCard>
           </Col>
-          <Col xs={24} lg={10}>
+        </Row>
+        
+        {/* Row 3: Lifespan & Detail Analysis */}
+        <Row gutter={[24, 24]} className="mb-8">
+          <Col xs={24} lg={12}>
              <GlassCard title="设备寿命健康度" icon={<BarChartOutlined />} className="h-full">
                <ReactECharts option={barOption} style={{ height: '220px' }} />
                <div className="mt-4 bg-orange-50 rounded-xl p-4 border border-orange-100 flex items-center justify-between">
@@ -458,60 +782,7 @@ const Dashboard: React.FC = () => {
                </div>
              </GlassCard>
           </Col>
-        </Row>
-
-        {/* Row 3: Detail Analysis */}
-        <Row gutter={[24, 24]} className="mb-8">
-          <Col xs={24} lg={12}>
-            <GlassCard 
-              title="特定品类深度分析" 
-              icon={<DashboardOutlined />} 
-              extra={
-                <Select 
-                  value={selectedCategory} 
-                  onChange={setSelectedCategory} 
-                  bordered={false}
-                  className="bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors min-w-[140px]"
-                  options={categories.map(c => ({ label: c.name, value: c.name }))}
-                />
-              }
-            >
-              {categoryStats && (
-                <div className="space-y-6">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100">
-                      <div className="text-indigo-600/70 text-xs font-bold uppercase mb-1">该品类资产总额</div>
-                      <div className="text-2xl font-extrabold text-indigo-900">¥ {categoryStats.totalValue.toLocaleString()}</div>
-                    </div>
-                    <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100">
-                      <div className="text-emerald-600/70 text-xs font-bold uppercase mb-1">设备总数量</div>
-                      <div className="text-2xl font-extrabold text-emerald-900">{categoryStats.totalCount} <span className="text-sm font-normal text-emerald-600">台</span></div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between items-center mb-3">
-                      <h4 className="font-bold text-gray-700">资产明细列表</h4>
-                      <Button type="link" size="small" onClick={() => handleExport(categoryStats.filtered, `${selectedCategory}_清单`)}>导出列表</Button>
-                    </div>
-                    <Table 
-                      dataSource={categoryStats.filtered.slice(0, 5)} 
-                      rowKey="id"
-                      pagination={false}
-                      size="small"
-                      className="no-border-table"
-                      columns={[
-                        { title: '资产编号', dataIndex: 'asset_code', render: t => <span className="font-mono text-gray-500 text-xs">{t}</span> },
-                        { title: '名称', dataIndex: 'name', render: t => <span className="font-medium text-gray-800 text-sm">{t}</span> },
-                        { title: '状态', dataIndex: 'status', align: 'right', render: (t) => getStatusBadge(t) },
-                      ]}
-                    />
-                  </div>
-                </div>
-              )}
-            </GlassCard>
-          </Col>
-
+          
           <Col xs={24} lg={12}>
             <GlassCard 
               title="订单资产追踪" 
@@ -524,7 +795,7 @@ const Dashboard: React.FC = () => {
                   bordered={false}
                   className="bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors min-w-[160px]"
                   placeholder="选择订单"
-                  dropdownMatchSelectWidth={false}
+                  popupMatchSelectWidth={false}
                   optionLabelProp="value"
                   options={orderOptions}
                 />
@@ -568,8 +839,91 @@ const Dashboard: React.FC = () => {
           </Col>
         </Row>
 
-        {/* Row 4: Operations */}
-        <Row gutter={[24, 24]}>
+      </Spin>
+
+      {/* Row 5: Stagnant Inventory */}
+      <Row gutter={[24, 24]} className="mt-12 mb-12">
+        <Col span={24}>
+          <StagnantInventory />
+        </Col>
+      </Row>
+
+      {/* Detail Modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <span className="text-gray-500">{drillDownCategory}</span>
+            <span className="text-gray-300">/</span>
+            <span className="font-bold">{selectedSlice?.name}</span>
+            <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 ml-2">
+               {selectedSlice?.type === 'brand' ? '品牌' : '型号'}
+            </span>
+          </div>
+        }
+        open={detailModalVisible}
+        onCancel={() => setDetailModalVisible(false)}
+        width={1000}
+        footer={null}
+      >
+        <div className="mb-4 flex justify-between items-center flex-wrap gap-4">
+          <Space>
+            <Input 
+              prefix={<SearchOutlined className="text-gray-400" />}
+              placeholder="搜索资产编号/序列号" 
+              value={detailSearchText}
+              onChange={e => setDetailSearchText(e.target.value)}
+              style={{ width: 240 }}
+              allowClear
+            />
+            <Select
+              placeholder="资产状态"
+              allowClear
+              style={{ width: 140 }}
+              value={detailStatusFilter}
+              onChange={setDetailStatusFilter}
+              options={[
+                { label: '在库', value: 'in_stock' },
+                { label: '在用', value: 'in_use' },
+                { label: '维修中', value: 'maintenance' },
+                { label: '已处置', value: 'disposed' },
+                { label: '已报废', value: 'scrapped' },
+              ]}
+            />
+          </Space>
+          <Button 
+            icon={<DownloadOutlined />} 
+            onClick={() => handleExport(getFilteredDetailList(), `${drillDownCategory}_${selectedSlice?.name}_资产清单`)}
+          >
+            导出列表
+          </Button>
+        </div>
+
+        <Table
+          dataSource={getFilteredDetailList()}
+          rowKey="id"
+          size="middle"
+          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => `共 ${total} 条` }}
+          columns={[
+            { title: '资产编号', dataIndex: 'asset_code', width: 120, render: t => <span className="font-mono">{t}</span> },
+            { title: '序列号', dataIndex: 'serial_number', width: 120, render: t => t || '-' },
+            { title: '设备名称', dataIndex: 'name', width: 150 },
+            { title: '型号', dataIndex: 'model', width: 120, render: t => t || '-' },
+            { title: '状态', dataIndex: 'status', width: 100, render: t => getStatusBadge(t) },
+            { title: '所属部门', dataIndex: 'department_name', width: 140, render: t => t || '-' },
+            { 
+              title: '入库时间', 
+              dataIndex: 'arrival_date', // Or created_at if arrival_date is often null
+              width: 120,
+              sorter: (a, b) => dayjs(a.arrival_date || a.created_at).unix() - dayjs(b.arrival_date || b.created_at).unix(),
+              render: (t, r) => t ? dayjs(t).format('YYYY-MM-DD') : (r.created_at ? dayjs(r.created_at).format('YYYY-MM-DD') : '-') 
+            },
+          ]}
+        />
+      </Modal>
+
+      {/* Row 4: Operations */}
+      <Spin spinning={loading} tip="加载流转记录...">
+        <Row gutter={[24, 24]} className="mb-8">
           <Col span={24}>
             <GlassCard 
               title="最近资产流转动态" 
@@ -662,14 +1016,6 @@ const Dashboard: React.FC = () => {
             </GlassCard>
           </Col>
         </Row>
-
-        {/* Row 5: Stagnant Inventory */}
-        <Row gutter={[24, 24]} className="mb-8">
-          <Col span={24}>
-            <StagnantInventory />
-          </Col>
-        </Row>
-
       </Spin>
       
       {/* Global Styles for Table Overrides */}
@@ -691,52 +1037,6 @@ const Dashboard: React.FC = () => {
           border-bottom: none !important;
         }
       `}</style>
-
-      {/* Stagnant Inventory Modal */}
-      <Modal
-        title={
-          <div className="flex items-center gap-2">
-            <HistoryOutlined className="text-orange-500" />
-            <span>呆滞库存清单 (超 {stagnantDays} 天无异动)</span>
-          </div>
-        }
-        open={isStagnantModalOpen}
-        onCancel={() => setIsStagnantModalOpen(false)}
-        footer={[
-          <Button key="close" onClick={() => setIsStagnantModalOpen(false)}>关闭</Button>,
-          <Button 
-            key="export" 
-            type="primary" 
-            icon={<DownloadOutlined />} 
-            onClick={() => handleExport(stagnantStats.candidates, `呆滞库存_${stagnantDays}天以上`)}
-          >
-            导出清单
-          </Button>
-        ]}
-        width={800}
-      >
-        <div className="mb-4 bg-orange-50 p-3 rounded border border-orange-100 text-orange-800 text-sm">
-           共有 <b>{stagnantStats.totalCount}</b> 台设备在过去 {stagnantDays} 天内没有发生过任何业务流转或信息更新，总价值 <b>¥{stagnantStats.totalValue.toLocaleString()}</b>。
-        </div>
-        <Table
-          dataSource={stagnantStats.candidates}
-          rowKey="id"
-          size="small"
-          pagination={{ pageSize: 10 }}
-          columns={[
-            { title: '资产编号', dataIndex: 'asset_code', width: 120 },
-            { title: '名称', dataIndex: 'name', width: 150 },
-            { title: '品牌/型号', render: (_, r) => <span className="text-gray-500">{r.brand} {r.model}</span> },
-            { title: '当前状态', dataIndex: 'status', width: 80, render: t => <Tag color="blue">在库</Tag> },
-            { 
-              title: '最后更新时间', 
-              dataIndex: 'updated_at', 
-              width: 150,
-              render: t => t ? dayjs(t).format('YYYY-MM-DD') : '-' 
-            }
-          ]}
-        />
-      </Modal>
     </div>
   );
 };

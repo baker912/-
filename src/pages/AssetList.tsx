@@ -151,7 +151,8 @@ const AssetList: React.FC = () => {
         description: equipment.accessory_info, // Accessary info to description
         purchase_price: equipment.price,
         tax_rate: equipment.tax_rate,
-        warranty_years: equipment.usage_years, // Auto-fill usage years
+        usage_years: equipment.usage_years, // Auto-fill usage years
+        warranty_period: equipment.warranty_period, // Auto-fill warranty period
         tax_inclusive_price: equipment.price && currentRate ? equipment.price * (1 + currentRate / 100) : undefined // Correct calculation
       });
     }
@@ -932,6 +933,18 @@ const AssetList: React.FC = () => {
                 <Col span={12}>
                   <Form.Item name="unit" label="单位">
                     <Input disabled className="bg-gray-50" />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="warranty_period"
+                    label="质保年限"
+                  >
+                    <InputNumber 
+                      style={{ width: '100%' }} 
+                      addonAfter="年"
+                      disabled className="bg-gray-50"
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
