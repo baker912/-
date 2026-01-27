@@ -20,6 +20,7 @@ const AssetForm: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [assetDictionary, setAssetDictionary] = useState<any[]>([]);
 
   useEffect(() => {
     fetchMetadata();
@@ -30,16 +31,19 @@ const AssetForm: React.FC = () => {
 
   const fetchMetadata = async () => {
     try {
-      const [catRes, deptRes] = await Promise.all([
+      const [catRes, deptRes, dictRes] = await Promise.all([
         supabase.from('categories').select('*'),
         supabase.from('departments').select('*'),
+        supabase.from('asset_dictionary').select('*'),
       ]);
 
       if (catRes.error) throw catRes.error;
       if (deptRes.error) throw deptRes.error;
+      if (dictRes.error) throw dictRes.error;
 
       setCategories(catRes.data || []);
       setDepartments(deptRes.data || []);
+      setAssetDictionary(dictRes.data || []);
     } catch (error: any) {
       message.error('Failed to load metadata');
     }
@@ -66,6 +70,25 @@ const AssetForm: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAssetSelect = (value: string) => {
+    const selectedAsset = assetDictionary.find(item => item.equipment_name === value);
+    if (selectedAsset) {
+      form.setFieldsValue({
+        tax_rate: selectedAsset.tax_rate,
+        warranty_years: selectedAsset.usage_years,
+      });
+    }
+  };
+
+  const calculateMonthsUsed = () => {
+    const purchaseDate = form.getFieldValue('purchase_date');
+    if (!purchaseDate) return 0;
+    
+    const now = dayjs();
+    const start = dayjs(purchaseDate);
+    return Math.max(0, now.diff(start, 'month'));
   };
 
   const onFinish = async (values: any) => {
@@ -147,7 +170,31 @@ const AssetForm: React.FC = () => {
               label="资产名称"
               rules={[{ required: true, message: '请输入资产名称' }]}
             >
-              <Input placeholder="例如：MacBook Pro" />
+              <Select 
+                showSearch
+                placeholder="选择资产名称"
+                optionFilterProp="children"
+                onChange={handleAssetSelect}
+              >
+                {assetDictionary.map(item => (
+                  <Option key={item.id} value={item.equipment_name}>
+                    {item.equipment_name}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
+
+            <Form.Item
+              name="tax_rate"
+              label="税率"
+            >
+               <InputNumber
+                style={{ width: '100%' }}
+                formatter={value => `${value}%`}
+                parser={value => value?.replace('%', '') as unknown as number}
+                disabled
+                className="bg-gray-50"
+              />
             </Form.Item>
 
             <Form.Item
@@ -189,7 +236,7 @@ const AssetForm: React.FC = () => {
 
             <Form.Item
               name="purchase_price"
-              label="采购价格"
+              label="单价"
             >
               <InputNumber
                 style={{ width: '100%' }}
@@ -199,10 +246,30 @@ const AssetForm: React.FC = () => {
             </Form.Item>
 
             <Form.Item
+              name="warranty_years"
+              label="使用年限"
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                addonAfter="年"
+                disabled
+                className="bg-gray-50"
+              />
+            </Form.Item>
+
+            <Form.Item
               name="purchase_date"
-              label="采购日期"
+              label="入账时间"
             >
               <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+
+            <Form.Item label="已使用月数">
+              <Input 
+                value={`${calculateMonthsUsed()}个月`} 
+                disabled 
+                className="bg-gray-50"
+              />
             </Form.Item>
 
             <Form.Item
