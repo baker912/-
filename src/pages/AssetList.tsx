@@ -151,9 +151,19 @@ const AssetList: React.FC = () => {
         description: equipment.accessory_info, // Accessary info to description
         purchase_price: equipment.price,
         tax_rate: equipment.tax_rate,
-        tax_inclusive_price: equipment.price && currentRate ? equipment.price * currentRate : undefined
+        warranty_years: equipment.usage_years, // Auto-fill usage years
+        tax_inclusive_price: equipment.price && currentRate ? equipment.price * (1 + currentRate / 100) : undefined // Correct calculation
       });
     }
+  };
+
+  const calculateMonthsUsed = () => {
+    const purchaseDate = form.getFieldValue('purchase_date');
+    if (!purchaseDate) return 0;
+    
+    const now = dayjs();
+    const start = dayjs(purchaseDate);
+    return Math.max(0, now.diff(start, 'month'));
   };
 
   const handleUpload = async (file: File) => {
@@ -969,13 +979,26 @@ const AssetList: React.FC = () => {
                 </Col>
                 <Col span={12}>
                   <Form.Item
+                    name="warranty_years"
+                    label="使用年限"
+                  >
+                    <InputNumber 
+                      style={{ width: '100%' }} 
+                      addonAfter="年"
+                      disabled className="bg-gray-50"
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
                     name="tax_rate"
                     label="税率"
                   >
                     <InputNumber 
                       style={{ width: '100%' }} 
-                      step={0.01}
-                      placeholder="请输入税率"
+                      formatter={value => `${value}%`}
+                      parser={value => value?.replace('%', '') as unknown as number}
+                      disabled className="bg-gray-50"
                     />
                   </Form.Item>
                 </Col>
@@ -1022,9 +1045,18 @@ const AssetList: React.FC = () => {
                 <Col span={12}>
                   <Form.Item
                     name="purchase_date"
-                    label="入库时间"
+                    label="入账时间"
                   >
                     <DatePicker showTime style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item label="已使用月数">
+                    <Input 
+                      value={`${calculateMonthsUsed()}个月`} 
+                      disabled 
+                      className="bg-gray-50"
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={12}>
@@ -1037,11 +1069,7 @@ const AssetList: React.FC = () => {
                     <DatePicker style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
-                  <Form.Item name="warranty_years" label="维保年限(年)">
-                    <InputNumber style={{ width: '100%' }} min={0} />
-                  </Form.Item>
-                </Col>
+                {/* warranty_years has been moved next to purchase_price */}
                 <Col span={12}>
                   <Form.Item name="accounting_date" label="入账日期">
                     <DatePicker style={{ width: '100%' }} />
@@ -1057,11 +1085,7 @@ const AssetList: React.FC = () => {
                     <Input placeholder="请输入" />
                   </Form.Item>
                 </Col>
-                <Col span={12}>
-                  <Form.Item name="planned_retirement_date" label="计划停止时间">
-                    <DatePicker style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
+                {/* planned_retirement_date replaced by calculated months used */}
                 <Col span={24}>
                   <Form.Item label="设备照片">
                     <Upload
