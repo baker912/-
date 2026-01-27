@@ -53,39 +53,63 @@ jobs:
           script: |
             set -e  # 遇到错误立即停止
             
-            # 定义目标目录 (CentOS 默认目录)
-            TARGET_DIR="/usr/share/nginx/html"
-            
-            echo "Starting deployment to $TARGET_DIR..."
-            
-            # 1. 确保目标目录存在
-            sudo mkdir -p $TARGET_DIR
-            
-            # 2. 清空旧文件
-            echo "Cleaning old files..."
-            sudo rm -rf $TARGET_DIR/*
-            
-            # 3. 解压新文件
+            # 3. 解压并部署到多个可能的目录
             echo "Extracting new files..."
-            # 注意：确保 tar 包里包含 dist/ 前缀，否则去掉 --strip-components=1
-            sudo tar -zxvf /tmp/dist.tar.gz -C $TARGET_DIR --strip-components=1
+            
+            # 定义可能的目标目录列表
+            TARGET_DIRS=("/usr/share/nginx/html" "/var/www/html")
+            
+            # 标记是否成功部署到至少一个目录
+            DEPLOYED=false
+            
+            for TARGET_DIR in "${TARGET_DIRS[@]}"; do
+                # 检查目录是否存在（或者父目录存在）
+                if [ -d "$TARGET_DIR" ] || [ -d "$(dirname "$TARGET_DIR")" ]; then
+                    echo "----------------------------------------"
+                    echo "Found target directory: $TARGET_DIR"
+                    
+                    # 确保目录存在
+                    sudo mkdir -p $TARGET_DIR
+                    
+                    # 清空旧文件
+                    sudo rm -rf $TARGET_DIR/*
+                    
+                    # 解压 (注意：tar 包还是那个 /tmp/dist.tar.gz)
+                    sudo tar -zxvf /tmp/dist.tar.gz -C $TARGET_DIR --strip-components=1
+                    
+                    # 尝试设置所有权为 nginx:nginx (CentOS/Nginx 默认)
+                    # 如果 nginx 用户不存在，尝试 apache，最后回退到 root
+                    if id "nginx" &>/dev/null; then
+                        sudo chown -R nginx:nginx $TARGET_DIR
+                    elif id "apache" &>/dev/null; then
+                        sudo chown -R apache:apache $TARGET_DIR
+                    else
+                        sudo chown -R root:root $TARGET_DIR
+                    fi
+                    
+                    sudo chmod -R 755 $TARGET_DIR
+                    
+                    # SELinux 修复
+                    if command -v restorecon >/dev/null 2>&1; then
+                        echo "Applying SELinux contexts..."
+                        sudo restorecon -R -v $TARGET_DIR || true
+                    fi
+                    
+                    DEPLOYED=true
+                    echo "Successfully deployed to $TARGET_DIR"
+                fi
+            done
+            
+            if [ "$DEPLOYED" = false ]; then
+                echo "Error: No suitable deployment directory found!"
+                exit 1
+            fi
             
             # 4. 清理临时文件
             sudo rm -f /tmp/dist.tar.gz
             
-            # 5. 修复权限 (Nginx 通常运行为 nginx 用户，给予适当权限)
-            echo "Fixing permissions..."
-            sudo chown -R root:root $TARGET_DIR
-            sudo chmod -R 755 $TARGET_DIR
-            
-            # 6. SELinux 修复 (CentOS 特有)
-            if command -v restorecon >/dev/null 2>&1; then
-                echo "Applying SELinux contexts..."
-                sudo restorecon -R -v $TARGET_DIR || true
-            fi
-            
-            # 7. 重载 Nginx
-            echo "Reloading Nginx..."
-            sudo systemctl reload nginx || sudo service nginx reload || true
+            # 5. 重启 Nginx (Restart 比 Reload 更彻底)
+            echo "Restarting Nginx..."
+            sudo systemctl restart nginx || sudo service nginx restart || true
             
             echo "Deployment finished successfully!"

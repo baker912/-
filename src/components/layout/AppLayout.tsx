@@ -126,6 +126,9 @@ const AppLayout: React.FC = () => {
           }}
         >
           <Outlet />
+          <div className="text-center text-gray-300 text-xs mt-8 pb-2">
+            System Version: 0.0.3 (Deployed: {new Date().toLocaleDateString()})
+          </div>
         </Content>
       </Layout>
     </Layout>
