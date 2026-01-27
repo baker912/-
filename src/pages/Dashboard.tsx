@@ -27,6 +27,7 @@ import { supabase } from '../lib/supabase';
 import { Asset, Category } from '../types';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
+import StagnantInventory from '../components/StagnantInventory';
 
 const { RangePicker } = DatePicker;
 
@@ -659,6 +660,13 @@ const Dashboard: React.FC = () => {
                 ]}
               />
             </GlassCard>
+          </Col>
+        </Row>
+
+        {/* Row 5: Stagnant Inventory */}
+        <Row gutter={[24, 24]} className="mb-8">
+          <Col span={24}>
+            <StagnantInventory />
           </Col>
         </Row>
 
