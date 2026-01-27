@@ -51,24 +51,41 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # 定义目标目录
+            set -e  # 遇到错误立即停止
+            
+            # 定义目标目录 (CentOS 默认目录)
             TARGET_DIR="/usr/share/nginx/html"
             
-            # 1. 清空旧文件 (保留目录本身)
-            rm -rf $TARGET_DIR/*
+            echo "Starting deployment to $TARGET_DIR..."
             
-            # 2. 解压新文件到目标目录
-            # --strip-components=1 去掉 dist/ 这一层
-            tar -zxvf /tmp/dist.tar.gz -C $TARGET_DIR --strip-components=1
+            # 1. 确保目标目录存在
+            sudo mkdir -p $TARGET_DIR
             
-            # 3. 清理临时压缩包
-            rm -f /tmp/dist.tar.gz
+            # 2. 清空旧文件
+            echo "Cleaning old files..."
+            sudo rm -rf $TARGET_DIR/*
             
-            # 4. 修复权限 (确保 Nginx 可读)
-            chown -R root:root $TARGET_DIR
-            chmod -R 755 $TARGET_DIR
+            # 3. 解压新文件
+            echo "Extracting new files..."
+            # 注意：确保 tar 包里包含 dist/ 前缀，否则去掉 --strip-components=1
+            sudo tar -zxvf /tmp/dist.tar.gz -C $TARGET_DIR --strip-components=1
             
-            # 5. 重载 Nginx (可选)
-            systemctl reload nginx || true
+            # 4. 清理临时文件
+            sudo rm -f /tmp/dist.tar.gz
             
-            echo "Deployment success!"
+            # 5. 修复权限 (Nginx 通常运行为 nginx 用户，给予适当权限)
+            echo "Fixing permissions..."
+            sudo chown -R root:root $TARGET_DIR
+            sudo chmod -R 755 $TARGET_DIR
+            
+            # 6. SELinux 修复 (CentOS 特有)
+            if command -v restorecon >/dev/null 2>&1; then
+                echo "Applying SELinux contexts..."
+                sudo restorecon -R -v $TARGET_DIR || true
+            fi
+            
+            # 7. 重载 Nginx
+            echo "Reloading Nginx..."
+            sudo systemctl reload nginx || sudo service nginx reload || true
+            
+            echo "Deployment finished successfully!"
