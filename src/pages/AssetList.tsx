@@ -934,6 +934,18 @@ const AssetList: React.FC = () => {
                     <Input disabled className="bg-gray-50" />
                   </Form.Item>
                 </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="warranty_years"
+                    label="使用年限"
+                  >
+                    <InputNumber 
+                      style={{ width: '100%' }} 
+                      addonAfter="年"
+                      disabled className="bg-gray-50"
+                    />
+                  </Form.Item>
+                </Col>
                 <Col span={24}>
                   <Form.Item name="description" label="配件信息">
                     <Input.TextArea rows={3} disabled className="bg-gray-50" />
@@ -973,18 +985,6 @@ const AssetList: React.FC = () => {
                       style={{ width: '100%' }} 
                       prefix="¥" 
                       precision={2}
-                      disabled className="bg-gray-50"
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="warranty_years"
-                    label="使用年限"
-                  >
-                    <InputNumber 
-                      style={{ width: '100%' }} 
-                      addonAfter="年"
                       disabled className="bg-gray-50"
                     />
                   </Form.Item>
