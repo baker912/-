@@ -608,6 +608,41 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
             )}
           </Form.Item>
 
+          {/* Auto-filled Asset Info */}
+          {selectedAssets.length === 1 && (
+            <Row gutter={24} className="bg-gray-50 p-3 rounded mb-4 border border-gray-100">
+              <Col span={8}>
+                <Form.Item label="单位" className="mb-0">
+                  <Input value={selectedAssets[0].unit || '-'} disabled className="bg-white text-gray-700" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item label="使用年限" className="mb-0">
+                  <Input value={selectedAssets[0].warranty_years ? `${selectedAssets[0].warranty_years}年` : '-'} disabled className="bg-white text-gray-700" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item label="已使用月数" className="mb-0">
+                  <Input 
+                    value={(() => {
+                      const asset = selectedAssets[0];
+                      // Use accounting_date (入账时间) or created_at (创建时间) or purchase_date (采购时间)
+                      const startDate = asset.accounting_date || asset.created_at || asset.purchase_date;
+                      if (!startDate) return '-';
+                      
+                      const start = dayjs(startDate);
+                      const now = dayjs();
+                      const months = now.diff(start, 'month');
+                      return `${Math.max(0, months)}个月`;
+                    })()} 
+                    disabled 
+                    className="bg-white text-gray-700" 
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
           {/* Custom form for Requisition */}
           {type === 'requisition' && (
             <Row gutter={24}>
