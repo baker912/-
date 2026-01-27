@@ -216,8 +216,8 @@ const MainLayout: React.FC = () => {
       <style>{`
         .custom-menu .ant-menu-item {
           margin-bottom: 8px;
-          font-size: 15px; /* 统一一级菜单字体大小 */
-          font-weight: 500; /* 统一一级菜单字体粗细 */
+          font-size: 15px;
+          font-weight: 500;
         }
         .custom-menu .ant-menu-submenu-title {
           font-weight: 500;
