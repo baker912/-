@@ -135,7 +135,7 @@ const Login: React.FC = () => {
 
             <div className="text-center mb-10">
               <h2 className="text-3xl font-extrabold text-gray-800 mb-2">欢迎登录</h2>
-              <p className="text-gray-400 text-sm">一汽-奥迪销售资产管理系统</p>
+              <p className="text-gray-400 text-sm">资产管理系统</p>
             </div>
 
             {/* Login Method 1: SSO */}
