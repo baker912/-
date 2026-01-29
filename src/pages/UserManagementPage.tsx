@@ -28,16 +28,21 @@ const { Option } = Select;
 
 // Mock Data based on OCR
 const MOCK_DATA = [
-  { id: 1, account: 'admin', name: 'admin', nickname: 'admin', dept: '一汽大众汽车有限公司', phone: '', status: true },
-  { id: 2, account: 'jwuser', name: 'jwuser', nickname: 'jwuser', dept: '', phone: '', status: true },
-  { id: 91, account: 'fusheng zheng', name: '郑福胜', nickname: 'fusheng zheng', dept: '国际运输与海关商检科', phone: '', status: false },
-  { id: 93, account: 'xiaodong li.LO', name: '刘晓东', nickname: 'xiaodong li.LO', dept: '物料管理科', phone: '', status: false },
-  { id: 109, account: 'Miao.Liang', name: '梁茂', nickname: 'Miao.Liang', dept: '区域售后服务部（V）', phone: '', status: false },
-  { id: 118, account: 'hong li', name: '李红', nickname: 'hong li', dept: '零售营销部（A）', phone: '', status: false },
-  { id: 124, account: 'huafeng.zhang', name: '张华风', nickname: 'huafeng.zhang', dept: '国际服务中心', phone: '', status: false },
-  { id: 220, account: 'wei fang', name: '房伟', nickname: 'wei fang', dept: '焊装一车间-Q5L维修区域-维修工段甲-维修2班', phone: '', status: false },
-  { id: 252, account: 'Shaojie Pan', name: '潘少杰', nickname: 'Shaojie Pan', dept: '热管理及充电系统开发科', phone: '', status: false },
-  { id: 256, account: 'hongjun.wang.cp', name: '王洪军', nickname: 'hongjun.wang.cp', dept: '焊装三车间-AGL生产一区域', phone: '', status: false },
+  { id: 1, account: 'admin', name: 'admin', nickname: 'admin', dept: '一汽大众汽车有限公司', phone: '13800138000', status: true, job_title: '系统管理员' },
+  { id: 2, account: 'jwuser', name: 'jwuser', nickname: 'jwuser', dept: 'IT开发部', phone: '13900139000', status: true, job_title: '普通员工' },
+  { id: 91, account: 'fusheng zheng', name: '郑福胜', nickname: 'fusheng zheng', dept: '国际运输与海关商检科', phone: '13700137001', status: false, job_title: '物流专员' },
+  { id: 93, account: 'xiaodong li.LO', name: '刘晓东', nickname: 'xiaodong li.LO', dept: '物料管理科', phone: '13600136002', status: false, job_title: '物料主管' },
+  { id: 109, account: 'Miao.Liang', name: '梁茂', nickname: 'Miao.Liang', dept: '区域售后服务部（V）', phone: '13500135003', status: false, job_title: '售后经理' },
+  { id: 118, account: 'hong li', name: '李红', nickname: 'hong li', dept: '零售营销部（A）', phone: '13400134004', status: false, job_title: '营销顾问' },
+  { id: 124, account: 'huafeng.zhang', name: '张华风', nickname: 'huafeng.zhang', dept: '国际服务中心', phone: '13300133005', status: false, job_title: '客服主管' },
+  { id: 220, account: 'wei fang', name: '房伟', nickname: 'wei fang', dept: '焊装一车间-Q5L维修区域', phone: '13200132006', status: false, job_title: '高级技师' },
+  { id: 252, account: 'Shaojie Pan', name: '潘少杰', nickname: 'Shaojie Pan', dept: '热管理及充电系统开发科', phone: '13100131007', status: false, job_title: '研发工程师' },
+  { id: 256, account: 'hongjun.wang.cp', name: '王洪军', nickname: 'hongjun.wang.cp', dept: '焊装三车间-AGL生产一区域', phone: '13000130008', status: false, job_title: '生产班长' },
+  { id: 300, account: 'Guo.Cheng', name: 'Guo.Cheng', nickname: 'Guo.Cheng', dept: '一汽-大众员工-Email Users', phone: '18600186009', status: true, job_title: '企业IT开发部部长' },
+  { id: 301, account: 'Wei.Zhang', name: '张伟', nickname: 'Wei.Zhang', dept: '数字化转型办公室', phone: '18500185010', status: true, job_title: '数字化总监' },
+  { id: 302, account: 'Li.Wang', name: '王力', nickname: 'Li.Wang', dept: '人力资源部', phone: '18800188011', status: true, job_title: 'HRBP' },
+  { id: 303, account: 'Yan.Chen', name: '陈燕', nickname: 'Yan.Chen', dept: '财务控制部', phone: '18700187012', status: true, job_title: '财务主管' },
+  { id: 304, account: 'Hui.Liu', name: '刘辉', nickname: 'Hui.Liu', dept: '采购部', phone: '18900189013', status: true, job_title: '采购专员' },
 ];
 
 const UserManagementPage: React.FC = () => {
