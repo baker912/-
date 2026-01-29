@@ -160,13 +160,28 @@ const MainLayout: React.FC = () => {
         collapsible 
         collapsed={collapsed} 
         className="shadow-md z-10"
-        style={{ background: '#001529' }}
+        style={{ 
+          background: '#001529',
+          overflow: 'auto',
+          height: '100vh',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+        }}
         width={220}
       >
-        <div className="h-16 flex items-center justify-center border-b border-gray-700 bg-[#002140]">
-          <span className={`text-xl font-bold text-white truncate transition-all duration-300 ${collapsed ? 'w-0 opacity-0' : 'w-auto opacity-100'}`}>
-            资产管理系统
-          </span>
+        <div className="h-16 flex items-center justify-center border-b border-gray-700 bg-[#002140] overflow-hidden">
+           <div className="flex items-center gap-3">
+             <div className="w-8 h-8 rounded bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/30">
+               <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                 <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+               </svg>
+             </div>
+             <span className={`text-lg font-bold text-white truncate transition-all duration-300 ${collapsed ? 'w-0 opacity-0 hidden' : 'w-auto opacity-100'}`}>
+               资产管理系统
+             </span>
+           </div>
         </div>
         <Menu
           theme="dark"
@@ -179,7 +194,7 @@ const MainLayout: React.FC = () => {
           style={{ background: 'transparent' }}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ marginLeft: collapsed ? 80 : 220, transition: 'all 0.2s' }}>
         <Header style={{ background: token.colorBgContainer }} className="flex justify-between items-center px-4 shadow-sm z-10 sticky top-0">
           <div className="flex items-center gap-4">
             <Button

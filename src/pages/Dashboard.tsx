@@ -60,7 +60,7 @@ interface AssetFlowRecord {
 interface DistributionNode {
   key: string;
   name: string;
-  type: 'category' | 'brand' | 'model';
+  type: 'category' | 'brand' | 'model' | 'equipment_type';
   count: number;
   totalValue: number;
   inUseCount: number;
@@ -144,12 +144,12 @@ const Dashboard: React.FC = () => {
 
   // Drill Down State
   const [drillDownCategory, setDrillDownCategory] = useState<string | null>(null);
-  const [drillDownType, setDrillDownType] = useState<'brand' | 'model'>('brand');
+  const [drillDownType, setDrillDownType] = useState<'brand' | 'model' | 'equipment_type'>('brand');
   const [expandedTreeKeys, setExpandedTreeKeys] = useState<string[]>([]);
   
   // Detail Modal State
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [selectedSlice, setSelectedSlice] = useState<{ name: string, type: 'brand' | 'model' } | null>(null);
+  const [selectedSlice, setSelectedSlice] = useState<{ name: string, type: 'brand' | 'model' | 'equipment_type' } | null>(null);
   const [detailFilters, setDetailFilters] = useState({
     keyword: '',
     status: [] as string[],
@@ -161,7 +161,7 @@ const Dashboard: React.FC = () => {
   const [selectedUsageSlice, setSelectedUsageSlice] = useState<string | null>(null);
 
   // --- Usage Duration Stats ---
-  const [durationDimension, setDurationDimension] = useState<'category' | 'brand' | 'model'>('category');
+  const [durationDimension, setDurationDimension] = useState<'category' | 'brand' | 'model' | 'equipment_type'>('category');
 
   // --- Order Assets Full View & Filter ---
   const [viewAllModalVisible, setViewAllModalVisible] = useState(false);
@@ -267,7 +267,15 @@ const Dashboard: React.FC = () => {
       return acc;
     }, {} as Record<string, number>);
 
-    return { brandData, modelData, totalCount: filtered.length };
+    // Group by Equipment Type
+    const equipmentTypeData = filtered.reduce((acc, asset: any) => {
+      const typeName = asset.equipment_type || '其他';
+      if (!acc[typeName]) acc[typeName] = 0;
+      acc[typeName] += 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    return { brandData, modelData, equipmentTypeData, totalCount: filtered.length };
   }, [assets, drillDownCategory]);
 
   // Hierarchical Data for Tree Table
@@ -279,6 +287,7 @@ const Dashboard: React.FC = () => {
       const catName = asset.category?.name || '其他';
       const brandName = asset.brand || '未知品牌';
       const modelName = asset.model || '未知型号';
+      const equipmentTypeName = asset.equipment_type || '其他';
       const price = asset.purchase_price || 0;
       const isInUse = asset.status === 'in_use';
       const isInStock = asset.status === 'in_stock';
@@ -304,9 +313,21 @@ const Dashboard: React.FC = () => {
       if (isInUse) catNode.inUseCount++;
       if (isInStock) catNode.inStockCount++;
 
-      // 2. Second Level (Brand or Model based on drillDownType)
-      const secondLevelName = drillDownType === 'brand' ? brandName : modelName;
-      const secondLevelType = drillDownType === 'brand' ? 'brand' : 'model';
+      // 2. Second Level (Brand, Model, or Equipment Type based on drillDownType)
+      let secondLevelName = '';
+      let secondLevelType: 'brand' | 'model' | 'equipment_type' = 'brand';
+      
+      if (drillDownType === 'brand') {
+        secondLevelName = brandName;
+        secondLevelType = 'brand';
+      } else if (drillDownType === 'model') {
+        secondLevelName = modelName;
+        secondLevelType = 'model';
+      } else {
+        secondLevelName = equipmentTypeName;
+        secondLevelType = 'equipment_type';
+      }
+      
       const secondLevelKey = `${drillDownType}_${catName}_${secondLevelName}`;
 
       let secondNode = catNode.children?.find(c => c.name === secondLevelName);
@@ -329,8 +350,21 @@ const Dashboard: React.FC = () => {
       if (isInStock) secondNode.inStockCount++;
 
       // 3. Third Level (The other one)
-      const thirdLevelName = drillDownType === 'brand' ? modelName : brandName;
-      const thirdLevelType = drillDownType === 'brand' ? 'model' : 'brand';
+      let thirdLevelName = '';
+      let thirdLevelType: 'brand' | 'model' | 'equipment_type' = 'model';
+
+      if (drillDownType === 'brand') {
+        thirdLevelName = modelName;
+        thirdLevelType = 'model';
+      } else if (drillDownType === 'model') {
+        thirdLevelName = brandName;
+        thirdLevelType = 'brand';
+      } else {
+        // If equipment_type is selected, use Brand as next level
+        thirdLevelName = brandName;
+        thirdLevelType = 'brand';
+      }
+
       const thirdLevelKey = `${thirdLevelType}_${catName}_${secondLevelName}_${thirdLevelName}`;
 
       let thirdNode = secondNode.children?.find(c => c.name === thirdLevelName);
@@ -502,8 +536,10 @@ const Dashboard: React.FC = () => {
       setDurationDimension('category');
     } else if (drillDownType === 'brand') {
       setDurationDimension('brand');
-    } else {
+    } else if (drillDownType === 'model') {
       setDurationDimension('model');
+    } else {
+      setDurationDimension('equipment_type');
     }
   }, [drillDownCategory, drillDownType]);
 
@@ -523,6 +559,7 @@ const Dashboard: React.FC = () => {
       if (durationDimension === 'category') key = asset.category?.name || '其他';
       else if (durationDimension === 'brand') key = asset.brand || '未知品牌';
       else if (durationDimension === 'model') key = asset.model || '未知型号';
+      else if (durationDimension === 'equipment_type') key = asset.equipment_type || '其他';
 
       // Calculate usage months
       // Priority: use_months field -> diff(now, purchase_date) -> 0
@@ -646,10 +683,21 @@ const Dashboard: React.FC = () => {
   const colors = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#3b82f6'];
 
   const pieOption = useMemo(() => {
-    // If drilling down, show brand or model distribution based on selection
+    // If drilling down, show brand or model or equipment_type distribution based on selection
     if (drillDownCategory && drillDownStats) {
-      const dataMap = drillDownType === 'brand' ? drillDownStats.brandData : drillDownStats.modelData;
-      const typeLabel = drillDownType === 'brand' ? '品牌' : '型号';
+      let dataMap: Record<string, number> = {};
+      let typeLabel = '';
+
+      if (drillDownType === 'brand') {
+        dataMap = drillDownStats.brandData;
+        typeLabel = '品牌';
+      } else if (drillDownType === 'model') {
+        dataMap = drillDownStats.modelData;
+        typeLabel = '型号';
+      } else {
+        dataMap = drillDownStats.equipmentTypeData;
+        typeLabel = '设备分类';
+      }
 
       return {
         color: colors,
@@ -924,12 +972,13 @@ const Dashboard: React.FC = () => {
                         <div className="flex items-center gap-2">
                            <PieChartOutlined className="text-indigo-500" />
                            <span className="font-bold text-gray-700">
-                             {drillDownCategory ? `${drillDownCategory} 分布详情` : "资产分类分布"}
+                             {drillDownCategory ? `${drillDownCategory} 分布详情` : "资产品类分布"}
                            </span>
-                           <span className="text-xs font-normal text-gray-400 ml-2 hidden sm:inline-block">
+                           <span className="ml-3 px-3 py-1 bg-indigo-50 text-indigo-600 text-xs rounded-full border border-indigo-100 font-medium shadow-sm flex items-center gap-1">
+                              <span className="animate-bounce">👇</span>
                               {drillDownCategory 
-                                ? '💡 点击扇区查看清单' 
-                                : '💡 点击扇区可下钻'}
+                                ? '点击扇区查看清单' 
+                                : '点击扇区可下钻查看详情'}
                            </span>
                         </div>
                         {drillDownCategory && (
@@ -941,6 +990,7 @@ const Dashboard: React.FC = () => {
                           >
                             <Radio.Button value="brand">按品牌</Radio.Button>
                             <Radio.Button value="model">按型号</Radio.Button>
+                            <Radio.Button value="equipment_type">按设备分类</Radio.Button>
                           </Radio.Group>
                         )}
                       </div>
@@ -974,6 +1024,7 @@ const Dashboard: React.FC = () => {
                           <Radio.Button value="category">品类</Radio.Button>
                           <Radio.Button value="brand">品牌</Radio.Button>
                           <Radio.Button value="model">型号</Radio.Button>
+                          <Radio.Button value="equipment_type">设备分类</Radio.Button>
                         </Radio.Group>
                       </div>
                       
@@ -1204,7 +1255,7 @@ const Dashboard: React.FC = () => {
             <span className="text-gray-300">/</span>
             <span className="font-bold">{selectedSlice?.name}</span>
             <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 ml-2">
-               {selectedSlice?.type === 'brand' ? '品牌' : '型号'}
+               {selectedSlice?.type === 'brand' ? '品牌' : (selectedSlice?.type === 'model' ? '型号' : '设备分类')}
             </span>
           </div>
         }
