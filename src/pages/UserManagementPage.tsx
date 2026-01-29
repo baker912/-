@@ -74,6 +74,12 @@ const UserManagementPage: React.FC = () => {
       key: 'dept',
     },
     {
+      title: '职位',
+      dataIndex: 'job_title',
+      key: 'job_title',
+      render: (text: string) => text ? <span className="px-2 py-0.5 rounded border border-red-400 text-gray-800 font-medium text-xs">{text}</span> : '-',
+    },
+    {
       title: '手机号码',
       dataIndex: 'phone',
       key: 'phone',
