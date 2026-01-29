@@ -58,6 +58,7 @@ export interface Asset {
   brand?: string;
   model?: string;
   unit?: string;
+  equipment_type?: string;
   attachments?: string[];
   employee_name?: string;
   employee_code?: string;

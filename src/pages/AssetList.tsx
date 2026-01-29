@@ -11,6 +11,18 @@ const { TabPane } = Tabs;
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
 
+const EQUIPMENT_CATEGORIES: Record<string, string[]> = {
+  '办公设备': ['员工笔记本', '台式机', '领导笔记本', 'IPad', '其他'],
+  '生产设备': ['PDA', '扫码枪', 'AGV', '其他'],
+  '网络设备': ['AP', '交换机', '其他'],
+  '耗材': ['打印纸', '墨盒', '其他'],
+  '零配件': ['键盘', '鼠标', '其他'],
+  '会议设备': ['音频设备', '视频设备', '投影设备', '视频会议一体机', '其他'],
+  '一卡通设备': ['食堂设备', '门禁设备', '监控设备', '其他'],
+  '非标准办公设备': ['领导需求', '员工需求', '运维需求', '研发需求', '其他'],
+  '通讯设备': ['座机', '服务器', '语音网关', '其他']
+};
+
 interface AssetFlow {
   id: string;
   operation_type: string; // 资产转移, 资产借用, etc.
@@ -37,7 +49,8 @@ const AssetList: React.FC = () => {
   const [fileList, setFileList] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
   const [flowRecords, setFlowRecords] = useState<any[]>([]);
-
+  const [equipmentOptions, setEquipmentOptions] = useState<string[]>([]);
+  
   useEffect(() => {
     if (editingAsset && drawerMode === 'view') {
       fetchFlowRecords(editingAsset.id);
@@ -124,6 +137,7 @@ const AssetList: React.FC = () => {
         label: item.equipment_name,
         value: item.equipment_name,
         category_id: item.category_id, // Add this
+        equipment_type: item.equipment_type, // Add this
         ...item // keep all data to auto-fill
       })) || [];
       
@@ -143,8 +157,18 @@ const AssetList: React.FC = () => {
     const equipment = availableEquipment.find(e => e.value === value);
     if (equipment) {
       const currentRate = equipment.tax_rate || form.getFieldValue('tax_rate') || 0;
+      
+      // Update options based on category
+      const category = categories.find(c => c.id === equipment.category_id);
+      if (category) {
+        setEquipmentOptions(EQUIPMENT_CATEGORIES[category.name] || []);
+      } else {
+        setEquipmentOptions([]);
+      }
+
       form.setFieldsValue({
         category_id: equipment.category_id, // Auto-fill category
+        equipment_type: equipment.equipment_type, // Auto-fill equipment type
         brand: equipment.brand,
         model: equipment.model, // This maps to asset_code in our logic if we treat model as type code, but here it's descriptive
         unit: equipment.unit,
@@ -225,6 +249,7 @@ const AssetList: React.FC = () => {
 
       if (values.name) query = query.ilike('name', `%${values.name}%`);
       if (values.category_id) query = query.eq('category_id', values.category_id);
+      if (values.equipment_type) query = query.eq('equipment_type', values.equipment_type);
       if (values.asset_code) query = query.ilike('asset_code', `%${values.asset_code}%`);
       if (values.serial_number) query = query.ilike('serial_number', `%${values.serial_number}%`);
       if (values.employee_code) query = query.ilike('employee_code', `%${values.employee_code}%`);
@@ -268,6 +293,14 @@ const AssetList: React.FC = () => {
 
   const handleEdit = (record: Asset) => {
     setEditingAsset(record);
+    
+    // Set equipment options for existing record
+    if (record.category) {
+      setEquipmentOptions(EQUIPMENT_CATEGORIES[record.category.name] || []);
+    } else {
+      setEquipmentOptions([]);
+    }
+
     form.setFieldsValue({
       ...record,
       purchase_date: record.purchase_date ? dayjs(record.purchase_date) : null,
@@ -282,6 +315,7 @@ const AssetList: React.FC = () => {
   const handleAdd = () => {
     setEditingAsset(null);
     form.resetFields();
+    setEquipmentOptions([]);
     // Default values
     form.setFieldsValue({
       status: 'in_stock',
@@ -344,6 +378,7 @@ const AssetList: React.FC = () => {
       序号: index + 1,
       设备名称: item.name,
       资产编号: item.asset_code,
+      设备分类: item.equipment_type || '-',
       设备序列号: item.serial_number,
       资产状态: item.status,
       员工姓名: item.employee_name,
@@ -429,6 +464,13 @@ const AssetList: React.FC = () => {
       key: 'category',
       width: 100,
       render: (text: string) => text || '-',
+    },
+    {
+      title: '设备分类',
+      dataIndex: 'equipment_type',
+      key: 'equipment_type',
+      width: 120,
+      render: (text: string) => <Typography.Text>{text || '-'}</Typography.Text>,
     },
     {
       title: '设备名称',
@@ -717,6 +759,7 @@ const AssetList: React.FC = () => {
                     </div>
                     <Row gutter={[24, 16]}>
                       <Col span={12}><div className="flex"><span className="w-24 text-gray-500">设备名称：</span><span>{editingAsset?.name}</span></div></Col>
+                      <Col span={12}><div className="flex"><span className="w-24 text-gray-500">设备分类：</span><span>{editingAsset?.equipment_type || '-'}</span></div></Col>
                       <Col span={12}><div className="flex"><span className="w-24 text-gray-500">品牌：</span><span>{editingAsset?.brand || '-'}</span></div></Col>
                       <Col span={12}><div className="flex"><span className="w-24 text-gray-500">型号：</span><span>{editingAsset?.model || '-'}</span></div></Col>
                       <Col span={12}><div className="flex"><span className="w-24 text-gray-500">单位：</span><span>{editingAsset?.unit || '台'}</span></div></Col>
@@ -901,8 +944,27 @@ const AssetList: React.FC = () => {
                     label="品类"
                     rules={[{ required: true, message: '请选择品类' }]}
                   >
-                    <Select placeholder="请选择">
+                    <Select placeholder="请选择" onChange={(val) => {
+                      const category = categories.find(c => c.id === val);
+                      form.setFieldsValue({ equipment_type: undefined });
+                      if (category) {
+                        setEquipmentOptions(EQUIPMENT_CATEGORIES[category.name] || []);
+                      } else {
+                        setEquipmentOptions([]);
+                      }
+                    }}>
                       {categories.map((c: any) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item
+                    name="equipment_type"
+                    label="设备分类"
+                    rules={[{ required: true, message: '请选择设备分类' }]}
+                  >
+                    <Select placeholder="请选择" disabled={equipmentOptions.length === 0}>
+                      {equipmentOptions.map(opt => <Option key={opt} value={opt}>{opt}</Option>)}
                     </Select>
                   </Form.Item>
                 </Col>

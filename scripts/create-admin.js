@@ -13,7 +13,7 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
 
 async function createAdmin() {
   const email = 'admin@faw-vw.com';
-  const password = '222222';
+  const password = 'Admin@Faw2026!';
 
   console.log(`正在创建管理员账号: ${email}...`);
 

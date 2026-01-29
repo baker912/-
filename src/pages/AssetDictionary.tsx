@@ -9,12 +9,25 @@ import * as XLSX from 'xlsx';
 const { Option } = Select;
 const { Title } = Typography;
 
+const EQUIPMENT_CATEGORIES: Record<string, string[]> = {
+  '办公设备': ['员工笔记本', '台式机', '领导笔记本', 'IPad', '其他'],
+  '生产设备': ['PDA', '扫码枪', 'AGV', '其他'],
+  '网络设备': ['AP', '交换机', '其他'],
+  '耗材': ['打印纸', '墨盒', '其他'],
+  '零配件': ['键盘', '鼠标', '其他'],
+  '会议设备': ['音频设备', '视频设备', '投影设备', '视频会议一体机', '其他'],
+  '一卡通设备': ['食堂设备', '门禁设备', '监控设备', '其他'],
+  '非标准办公设备': ['领导需求', '员工需求', '运维需求', '研发需求', '其他'],
+  '通讯设备': ['座机', '服务器', '语音网关', '其他']
+};
+
 interface DictionaryItem {
   id: string;
   project_name: string;
   bm_number: string;
   procurement_order: string;
   equipment_name: string;
+  equipment_type?: string;
   brand: string;
   model: string;
   unit: string;
@@ -51,6 +64,7 @@ const AssetDictionary: React.FC = () => {
   const [projects, setProjects] = useState<any[]>([]);
   const [availableSuppliers, setAvailableSuppliers] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [equipmentOptions, setEquipmentOptions] = useState<string[]>([]);
   
   // Selection State
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -99,6 +113,7 @@ const AssetDictionary: React.FC = () => {
 
       if (filters.project_name) query = query.ilike('project_name', `%${filters.project_name}%`);
       if (filters.category_id) query = query.eq('category_id', filters.category_id);
+      if (filters.equipment_type) query = query.eq('equipment_type', filters.equipment_type);
       if (filters.equipment_name) query = query.ilike('equipment_name', `%${filters.equipment_name}%`);
       if (filters.supplier) query = query.ilike('supplier', `%${filters.supplier}%`);
       if (filters.brand) query = query.ilike('brand', `%${filters.brand}%`);
@@ -246,6 +261,14 @@ const AssetDictionary: React.FC = () => {
   const handleEdit = (record: DictionaryItem) => {
     setEditingItem(record);
     form.setFieldsValue(record);
+
+    // Initialize equipment options based on current category
+    if (record.category) {
+      const options = EQUIPMENT_CATEGORIES[record.category.name] || [];
+      setEquipmentOptions(options);
+    } else {
+      setEquipmentOptions([]);
+    }
     
     // Initialize fileList from images array
     if (record.images && record.images.length > 0) {
@@ -266,6 +289,7 @@ const AssetDictionary: React.FC = () => {
     setEditingItem(null);
     form.resetFields();
     setFileList([]);
+    setEquipmentOptions([]);
     setIsDrawerOpen(true);
   };
 
@@ -281,6 +305,7 @@ const AssetDictionary: React.FC = () => {
       序号: index + 1,
       项目名称: item.project_name,
       品类: item.category?.name || '-',
+      设备分类: item.equipment_type || '-',
       BM单号: item.bm_number,
       采购订单: item.procurement_order,
       设备名称: item.equipment_name,
@@ -366,6 +391,13 @@ const AssetDictionary: React.FC = () => {
       key: 'category',
       width: 100,
       render: (text: string) => text || '-',
+    },
+    {
+      title: '设备分类',
+      dataIndex: 'equipment_type',
+      key: 'equipment_type',
+      width: 120,
+      render: (text: string) => <Typography.Text>{text || '-'}</Typography.Text>,
     },
     {
       title: 'BM单号',
@@ -454,8 +486,23 @@ const AssetDictionary: React.FC = () => {
             </Col>
             <Col xs={24} sm={12} md={8} lg={6} xl={6}>
               <Form.Item name="category_id" label="品类" className="w-full mb-0">
-                <Select placeholder="请选择" allowClear>
+                <Select placeholder="请选择" allowClear onChange={(val) => {
+                  const category = categories.find(c => c.id === val);
+                  if (category) {
+                    setEquipmentOptions(EQUIPMENT_CATEGORIES[category.name] || []);
+                  } else {
+                    setEquipmentOptions([]);
+                  }
+                  searchForm.setFieldsValue({ equipment_type: undefined });
+                }}>
                   {categories.map((c: any) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={8} lg={6} xl={6}>
+              <Form.Item name="equipment_type" label="设备分类" className="w-full mb-0">
+                <Select placeholder="请选择" allowClear disabled={equipmentOptions.length === 0}>
+                  {equipmentOptions.map(opt => <Option key={opt} value={opt}>{opt}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
@@ -633,8 +680,27 @@ const AssetDictionary: React.FC = () => {
                   label="品类"
                   rules={[{ required: true, message: '请选择品类' }]}
                 >
-                  <Select placeholder="请选择">
+                  <Select placeholder="请选择" onChange={(val) => {
+                    const category = categories.find(c => c.id === val);
+                    form.setFieldsValue({ equipment_type: undefined });
+                    if (category) {
+                      setEquipmentOptions(EQUIPMENT_CATEGORIES[category.name] || []);
+                    } else {
+                      setEquipmentOptions([]);
+                    }
+                  }}>
                     {categories.map((c: any) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="equipment_type"
+                  label="设备分类"
+                  rules={[{ required: true, message: '请选择设备分类' }]}
+                >
+                  <Select placeholder="请选择" disabled={equipmentOptions.length === 0}>
+                    {equipmentOptions.map(opt => <Option key={opt} value={opt}>{opt}</Option>)}
                   </Select>
                 </Form.Item>
               </Col>

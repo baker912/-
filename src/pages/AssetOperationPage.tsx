@@ -13,8 +13,8 @@ const { RangePicker } = DatePicker;
 
 // Mock data for dropdowns (replace with API data if available)
 const MOCK_FLOORS = ['3F', '4F', '5F', '6F', '7F', '8F'];
-const MOCK_ROOM_TYPES = ['开放办公区', '独立办公室', '会议室', '研发实验室', '服务器机房', '仓库'];
-const MOCK_LOCATIONS = ['工位-001', '工位-002', '工位-003', '会议室A', '实验室B'];
+const MOCK_ROOM_TYPES = ['开放办公区', '独立办公室', '会议室', '研发实验室', '服务器机房', '仓库', '库房'];
+const MOCK_LOCATIONS = ['工位-001', '工位-002', '工位-003', '会议室A', '实验室B', 'B707'];
 // Mock user list for "requisition" user selection
 const MOCK_USERS = [
   { name: '张三', code: 'EMP1001', dept: '技术部' },
@@ -65,6 +65,7 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
       if (values.operator && type !== 'requisition' && type !== 'borrow' && type !== 'return' && type !== 'scrap' && type !== 'dispose') query = query.ilike('operator', `%${values.operator}%`);
       if (values.related_form_no && (type === 'requisition' || type === 'borrow' || type === 'transfer')) query = query.ilike('related_form_no', `%${values.related_form_no}%`);
       if (values.target_employee_name && (type === 'requisition' || type === 'borrow' || type === 'return' || type === 'transfer')) query = query.ilike('target_employee_name', `%${values.target_employee_name}%`);
+      if (values.return_type && type === 'return') query = query.eq('return_type', values.return_type);
       
       // Filter by joined asset table
       if (values.asset_name) query = query.ilike('asset.name', `%${values.asset_name}%`);
@@ -150,6 +151,29 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
     setFilteredAssets(data || []);
   };
 
+  useEffect(() => {
+    // Logic for Return type: Auto-fill returner based on selected asset's user
+    if (type === 'return') {
+      if (selectedAssets.length > 0) {
+        // Get all unique users from selected assets
+        const users = Array.from(new Set(selectedAssets.map(a => a.employee_name).filter(Boolean)));
+        
+        if (users.length === 1) {
+           form.setFieldsValue({ target_employee_name: users[0] });
+        } else if (users.length > 1) {
+           // Multiple different users
+           form.setFieldsValue({ target_employee_name: undefined });
+           message.warning('选中资产属于不同的使用人，请确认归还人');
+        } else {
+           // No user info
+           form.setFieldsValue({ target_employee_name: undefined });
+        }
+      } else {
+        form.setFieldsValue({ target_employee_name: undefined });
+      }
+    }
+  }, [selectedAssets, type, form]);
+
   const handleAdd = () => {
     fetchAvailableAssets();
     form.resetFields();
@@ -203,7 +227,8 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
           target_specific_location: values.target_specific_location,
           target_location: finalTargetLocation,
           borrow_start_time: values.borrow_start_time ? values.borrow_start_time.format() : null,
-          borrow_end_time: values.borrow_end_time ? values.borrow_end_time.format() : null
+          borrow_end_time: values.borrow_end_time ? values.borrow_end_time.format() : null,
+          return_type: type === 'return' ? (values.return_type || 'normal') : null
         };
 
         const { error: insertError } = await supabase
@@ -298,6 +323,7 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
       ITSH单号: item.related_form_no || '-',
       相关人员: item.target_employee_name || '-',
       相关部门: item.target_department_name || '-',
+      归还类型: type === 'return' ? (item.return_type === 'resignation' ? '离职归还' : '普通归还') : '-',
       位置: item.target_location || '-',
       备注: item.description || '-'
     })));
@@ -365,6 +391,18 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
     { title: '工号', dataIndex: 'target_employee_code', key: 'target_employee_code', hidden: type !== 'requisition' },
     { title: '部门', dataIndex: 'target_department_name', key: 'target_department_name', hidden: type !== 'requisition' },
     
+    // Return Fields
+    { 
+      title: '归还类型', 
+      dataIndex: 'return_type', 
+      key: 'return_type', 
+      hidden: type !== 'return',
+      render: (text: string) => {
+        if (!text) return '普通归还';
+        return text === 'resignation' ? <Tag color="orange">离职归还</Tag> : <Tag color="blue">普通归还</Tag>;
+      }
+    },
+
     // Borrow Fields
     { title: '借用人', dataIndex: 'target_employee_name', key: 'borrower', hidden: type !== 'borrow' },
     { title: '开始时间', dataIndex: 'borrow_start_time', key: 'borrow_start_time', render: (text: string) => text ? dayjs(text).format('YYYY-MM-DD HH:mm') : '-', hidden: type !== 'borrow' },
@@ -481,6 +519,16 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
               <Col xs={24} sm={12} md={8} lg={6} xl={6}>
                 <Form.Item name="target_employee_name" label="借用人" className="w-full mb-0">
                   <Input placeholder="请输入" />
+                </Form.Item>
+              </Col>
+            )}
+            {type === 'return' && (
+              <Col xs={24} sm={12} md={8} lg={6} xl={6}>
+                <Form.Item name="return_type" label="归还类型" className="w-full mb-0">
+                  <Select placeholder="请选择" allowClear>
+                    <Option value="normal">普通归还</Option>
+                    <Option value="resignation">离职归还</Option>
+                  </Select>
                 </Form.Item>
               </Col>
             )}
@@ -764,29 +812,35 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
           {/* Custom form for Return */}
           {type === 'return' && (
             <Row gutter={24}>
-              <Col span={12}>
-                <Form.Item name="target_employee_name" label="归还人姓名" rules={[{ required: true, message: '请选择' }]}>
-                   <Select placeholder="请选择" onChange={handleUserChange}>
-                    {MOCK_USERS.map(u => <Option key={u.name} value={u.name}>{u.name}</Option>)}
-                   </Select>
+              <Col span={24}>
+                <Form.Item name="return_type" label="归还类型" initialValue="normal" rules={[{ required: true, message: '请选择' }]}>
+                  <Select placeholder="请选择">
+                    <Option value="normal">普通归还</Option>
+                    <Option value="resignation">离职归还</Option>
+                  </Select>
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="target_floor" label="归还位置楼层" rules={[{ required: true, message: '请选择' }]}>
+                <Form.Item name="target_employee_name" label="归还人姓名" rules={[{ required: true, message: '请选择' }]}>
+                   <Input placeholder="自动带出" readOnly className="bg-gray-100 text-gray-700" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="target_floor" label="归还位置楼层" initialValue="7F">
                   <Select placeholder="请选择">
                     {MOCK_FLOORS.map(f => <Option key={f} value={f}>{f}</Option>)}
                   </Select>
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="target_room_type" label="归还位置属性" rules={[{ required: true, message: '请选择' }]}>
+                <Form.Item name="target_room_type" label="归还位置属性" initialValue="库房">
                   <Select placeholder="请选择">
                     {MOCK_ROOM_TYPES.map(r => <Option key={r} value={r}>{r}</Option>)}
                   </Select>
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="target_specific_location" label="归还具体位置" rules={[{ required: true, message: '请选择' }]}>
+                <Form.Item name="target_specific_location" label="归还具体位置" initialValue="B707">
                   <Select placeholder="请选择">
                     {MOCK_LOCATIONS.map(l => <Option key={l} value={l}>{l}</Option>)}
                   </Select>
@@ -892,6 +946,12 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
                 <Text type="secondary">操作人：</Text>
                 <div>{selectedRecord.operator}</div>
               </Col>
+              {type === 'return' && (
+                <Col span={12}>
+                  <Text type="secondary">归还类型：</Text>
+                  <div>{selectedRecord.return_type === 'resignation' ? <Tag color="orange">离职归还</Tag> : <Tag color="blue">普通归还</Tag>}</div>
+                </Col>
+              )}
               {type === 'requisition' && (
                 <Col span={12}>
                   <Text type="secondary">ITSH关联单号：</Text>
