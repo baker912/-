@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Table, Button, Space, Input, Tag, Card, Modal, Form, Select, DatePicker, InputNumber, message, Drawer, Row, Col, Dropdown, Tabs, Timeline, Upload, Typography } from 'antd';
 import { PlusOutlined, SearchOutlined, EditOutlined, DeleteOutlined, ImportOutlined, DownOutlined, ExportOutlined, ReloadOutlined, FileTextOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importAssets } from '../lib/importers';
 import { Asset, Category, Department } from '../types';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -50,6 +53,7 @@ const AssetList: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [flowRecords, setFlowRecords] = useState<any[]>([]);
   const [equipmentOptions, setEquipmentOptions] = useState<string[]>([]);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   
   useEffect(() => {
     if (editingAsset && drawerMode === 'view') {
@@ -413,29 +417,12 @@ const AssetList: React.FC = () => {
       {
         key: 'template',
         label: '下载模版',
-        onClick: () => {
-          const ws = XLSX.utils.json_to_sheet([
-            {
-              资产名称: '示例资产',
-              资产编号: 'AST-001',
-              分类: '示例分类',
-              部门: '示例部门',
-              状态: '库存',
-              采购价格: 1000,
-              采购日期: '2023-01-01',
-              存放位置: 'A-101',
-              备注描述: '示例备注'
-            }
-          ]);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, "模版");
-          XLSX.writeFile(wb, `资产导入模版.xlsx`);
-        }
+        onClick: () => downloadImportTemplate('assets')
       },
       {
         key: 'import',
         label: '导入数据',
-        onClick: () => message.info('导入功能开发中')
+        onClick: () => setIsImportOpen(true)
       },
     ],
   };
@@ -568,6 +555,23 @@ const AssetList: React.FC = () => {
 
   return (
     <div>
+      <ExcelImportModal
+        open={isImportOpen}
+        title="导入资产"
+        sheetNames={['模板']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importAssets(dataBySheet['模板'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('资产'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchAssets();
+        }}
+      />
       <div className="bg-white p-4 mb-4 rounded-lg shadow-sm">
         <Form form={searchForm} layout="inline" className="w-full">
           <Row gutter={[16, 16]} className="w-full">

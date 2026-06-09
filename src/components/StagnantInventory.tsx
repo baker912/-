@@ -48,28 +48,39 @@ const StagnantInventory: React.FC<StagnantInventoryProps> = ({ className = '' })
         .from('assets')
         .select(`
           *,
-          category:categories!assets_category_id_fkey(name),
-          flows:asset_flow_records!asset_flow_records_asset_id_fkey(
-            id,
-            operation_type,
-            operation_time,
-            operator
-          )
+          category:categories!assets_category_id_fkey(name)
         `)
         .eq('status', 'in_stock');
 
       if (assetsError) throw assetsError;
 
+      const assetIds = (inStockAssets || []).map((a: any) => a.id).filter(Boolean);
+      const { data: flowRows, error: flowsError } = assetIds.length
+        ? await supabase
+            .from('asset_flow_records')
+            .select('asset_id, operation_time')
+            .in('asset_id', assetIds)
+        : { data: [], error: null as any };
+      if (flowsError) throw flowsError;
+
+      const flowMap = new Map<string, string[]>();
+      for (const r of flowRows || []) {
+        if (!r?.asset_id || !r?.operation_time) continue;
+        const list = flowMap.get(r.asset_id) || [];
+        list.push(r.operation_time);
+        flowMap.set(r.asset_id, list);
+      }
+
       // 2. 筛选呆滞库存（在指定时间段内没有任何资产流动记录）
       const stagnantAssets = (inStockAssets || []).filter((asset: any) => {
-        // 如果没有任何流动记录，则认为是呆滞的
-        if (!asset.flows || asset.flows.length === 0) {
+        const flows = flowMap.get(asset.id) || [];
+        if (flows.length === 0) {
           return true;
         }
 
         // 检查在指定时间段内是否有流动记录
-        const hasRecentFlow = asset.flows.some((flow: any) => {
-          const flowDate = dayjs(flow.operation_time);
+        const hasRecentFlow = flows.some((t: string) => {
+          const flowDate = dayjs(t);
           return flowDate.isAfter(startDate) && flowDate.isBefore(endDate);
         });
 

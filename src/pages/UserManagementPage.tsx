@@ -1,221 +1,308 @@
-import React, { useState } from 'react';
-import { 
-  Table, 
-  Button, 
-  Input, 
-  Select, 
-  DatePicker, 
-  Switch, 
-  Space, 
-  Row, 
-  Col, 
-  Form,
-  message,
-  Pagination
-} from 'antd';
-import { 
-  PlusOutlined, 
-  EditOutlined, 
-  DeleteOutlined, 
-  ImportOutlined, 
-  ExportOutlined,
-  SearchOutlined
-} from '@ant-design/icons';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Table, Button, Dropdown, Input, Select, Space, Row, Col, Form, message, Modal, Popconfirm, Tag } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, DownOutlined, UploadOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import * as XLSX from 'xlsx';
+import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importUsers } from '../lib/importers';
 
-const { RangePicker } = DatePicker;
 const { Option } = Select;
 
-// Mock Data based on OCR
-const MOCK_DATA = [
-  { id: 1, account: 'admin', name: 'admin', nickname: 'admin', dept: '一汽大众汽车有限公司', phone: '13800138000', status: true, job_title: '系统管理员' },
-  { id: 2, account: 'jwuser', name: 'jwuser', nickname: 'jwuser', dept: 'IT开发部', phone: '13900139000', status: true, job_title: '普通员工' },
-  { id: 91, account: 'fusheng zheng', name: '郑福胜', nickname: 'fusheng zheng', dept: '国际运输与海关商检科', phone: '13700137001', status: false, job_title: '物流专员' },
-  { id: 93, account: 'xiaodong li.LO', name: '刘晓东', nickname: 'xiaodong li.LO', dept: '物料管理科', phone: '13600136002', status: false, job_title: '物料主管' },
-  { id: 109, account: 'Miao.Liang', name: '梁茂', nickname: 'Miao.Liang', dept: '区域售后服务部（V）', phone: '13500135003', status: false, job_title: '售后经理' },
-  { id: 118, account: 'hong li', name: '李红', nickname: 'hong li', dept: '零售营销部（A）', phone: '13400134004', status: false, job_title: '营销顾问' },
-  { id: 124, account: 'huafeng.zhang', name: '张华风', nickname: 'huafeng.zhang', dept: '国际服务中心', phone: '13300133005', status: false, job_title: '客服主管' },
-  { id: 220, account: 'wei fang', name: '房伟', nickname: 'wei fang', dept: '焊装一车间-Q5L维修区域', phone: '13200132006', status: false, job_title: '高级技师' },
-  { id: 252, account: 'Shaojie Pan', name: '潘少杰', nickname: 'Shaojie Pan', dept: '热管理及充电系统开发科', phone: '13100131007', status: false, job_title: '研发工程师' },
-  { id: 256, account: 'hongjun.wang.cp', name: '王洪军', nickname: 'hongjun.wang.cp', dept: '焊装三车间-AGL生产一区域', phone: '13000130008', status: false, job_title: '生产班长' },
-  { id: 300, account: 'Guo.Cheng', name: 'Guo.Cheng', nickname: 'Guo.Cheng', dept: '一汽-大众员工-Email Users', phone: '18600186009', status: true, job_title: '企业IT开发部部长' },
-  { id: 301, account: 'Wei.Zhang', name: '张伟', nickname: 'Wei.Zhang', dept: '数字化转型办公室', phone: '18500185010', status: true, job_title: '数字化总监' },
-  { id: 302, account: 'Li.Wang', name: '王力', nickname: 'Li.Wang', dept: '人力资源部', phone: '18800188011', status: true, job_title: 'HRBP' },
-  { id: 303, account: 'Yan.Chen', name: '陈燕', nickname: 'Yan.Chen', dept: '财务控制部', phone: '18700187012', status: true, job_title: '财务主管' },
-  { id: 304, account: 'Hui.Liu', name: '刘辉', nickname: 'Hui.Liu', dept: '采购部', phone: '18900189013', status: true, job_title: '采购专员' },
-];
+type UserRow = {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'manager' | 'user';
+  job_title?: string | null;
+  created_at?: string;
+};
 
 const UserManagementPage: React.FC = () => {
-  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [dataSource, setDataSource] = useState(MOCK_DATA);
+  const [dataSource, setDataSource] = useState<UserRow[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editing, setEditing] = useState<UserRow | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
-  const columns = [
+  const [searchForm] = Form.useForm();
+  const [editForm] = Form.useForm();
+
+  const selectedRow = useMemo(() => {
+    const id = selectedRowKeys.length === 1 ? String(selectedRowKeys[0]) : '';
+    return id ? dataSource.find((x) => x.id === id) || null : null;
+  }, [dataSource, selectedRowKeys]);
+
+  const fetchUsers = async (values: any = {}) => {
+    setLoading(true);
+    try {
+      const keyword = String(values.keyword || '').trim();
+      const role = String(values.role || '').trim();
+
+      let q: any = supabase.from('users').select('*').order('created_at', { ascending: false });
+      if (keyword) q = q.or(`name.ilike.%${keyword}%,email.ilike.%${keyword}%`);
+      if (role) q = q.eq('role', role);
+
+      const { data, error } = await q;
+      if (error) throw error;
+      setDataSource((data || []) as any);
+    } catch (e: any) {
+      message.error(`获取用户列表失败：${e?.message || e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchUsers();
+  }, []);
+
+  const openCreate = () => {
+    setEditing(null);
+    editForm.resetFields();
+    setIsEditOpen(true);
+  };
+
+  const openEdit = (row: UserRow) => {
+    setEditing(row);
+    editForm.setFieldsValue({
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      job_title: row.job_title || '',
+      password: ''
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleDelete = async (ids: string[]) => {
+    if (!ids.length) return;
+    setLoading(true);
+    try {
+      for (const id of ids) {
+        const { error } = await supabase.from('users').delete().eq('id', id);
+        if (error) throw error;
+      }
+      message.success('删除成功');
+      setSelectedRowKeys([]);
+      await fetchUsers(searchForm.getFieldsValue());
+    } catch (e: any) {
+      message.error(`删除失败：${e?.message || e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const columns: any[] = [
+    { title: '邮箱', dataIndex: 'email', key: 'email' },
+    { title: '姓名', dataIndex: 'name', key: 'name' },
     {
-      title: '序号',
-      dataIndex: 'id',
-      key: 'id',
-      width: 80,
+      title: '角色',
+      dataIndex: 'role',
+      key: 'role',
+      render: (v: string) => {
+        const color = v === 'admin' ? 'red' : v === 'manager' ? 'blue' : 'default';
+        const label = v === 'admin' ? '管理员' : v === 'manager' ? '主管' : '普通用户';
+        return <Tag color={color}>{label}</Tag>;
+      }
+    },
+    { title: '职位', dataIndex: 'job_title', key: 'job_title', render: (v: string) => v || '-' },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 170,
+      render: (v: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-')
     },
     {
-      title: '用户账号',
-      dataIndex: 'account',
-      key: 'account',
-    },
-    {
-      title: '用户姓名',
-      dataIndex: 'name',
-      key: 'name',
-    },
-    {
-      title: '用户昵称',
-      dataIndex: 'nickname',
-      key: 'nickname',
-    },
-    {
-      title: '部门',
-      dataIndex: 'dept',
-      key: 'dept',
-    },
-    {
-      title: '职位',
-      dataIndex: 'job_title',
-      key: 'job_title',
-      render: (text: string) => text ? <span className="px-2 py-0.5 rounded border border-red-400 text-gray-800 font-medium text-xs">{text}</span> : '-',
-    },
-    {
-      title: '手机号码',
-      dataIndex: 'phone',
-      key: 'phone',
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      render: (checked: boolean, record: any) => (
-        <Switch 
-          checked={checked} 
-          size="small"
-          onChange={(val) => handleStatusChange(record.id, val)}
-        />
-      ),
-    },
+      title: '操作',
+      key: 'action',
+      width: 140,
+      render: (_: any, row: UserRow) => (
+        <Space size="small">
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(row)}>
+            编辑
+          </Button>
+          <Popconfirm title="确定删除该用户？" onConfirm={() => handleDelete([row.id])}>
+            <Button type="link" danger size="small" icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
+      )
+    }
   ];
 
-  const handleStatusChange = (id: number, checked: boolean) => {
-    const newData = dataSource.map(item => 
-      item.id === id ? { ...item, status: checked } : item
-    );
-    setDataSource(newData);
-    message.success(`状态已${checked ? '开启' : '关闭'}`);
-  };
-
-  const handleSearch = (values: any) => {
-    setLoading(true);
-    // Simulate API search
-    setTimeout(() => {
-      console.log('Search values:', values);
-      // In real app, call API here. For now just mock loading.
-      setLoading(false);
-    }, 500);
-  };
-
-  const rowSelection = {
-    selectedRowKeys,
-    onChange: (newSelectedRowKeys: React.Key[]) => {
-      setSelectedRowKeys(newSelectedRowKeys);
-    },
+  const importMenu = {
+    items: [
+      { key: 'template', label: '下载导入模板', onClick: () => downloadImportTemplate('users') },
+      { key: 'import', label: '导入数据', onClick: () => setIsImportOpen(true) }
+    ]
   };
 
   return (
     <div className="h-full flex flex-col">
-      {/* Filter Area */}
+      <ExcelImportModal
+        open={isImportOpen}
+        title="导入人员"
+        sheetNames={['模板']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importUsers(dataBySheet['模板'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('人员'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchUsers(searchForm.getFieldsValue());
+        }}
+      />
+
       <div className="bg-white p-4 rounded-lg shadow-sm mb-4">
         <Form
-          form={form}
+          form={searchForm}
           layout="inline"
-          onFinish={handleSearch}
+          onFinish={(v) => void fetchUsers(v)}
           className="w-full"
         >
-          <Row gutter={[16, 16]} className="w-full">
-            <Col xs={24} sm={12} md={8} lg={6} xl={6}>
-              <Form.Item name="dept" label="部门名称" className="w-full mb-0">
-                <Select placeholder="请选择部门" allowClear>
-                  <Option value="dept1">技术部</Option>
-                  <Option value="dept2">人事部</Option>
-                  <Option value="dept3">财务部</Option>
-                </Select>
+          <Row gutter={[16, 16]} className="w-full items-center">
+            <Col xs={24} sm={12} md={10} lg={8} xl={8}>
+              <Form.Item name="keyword" label="关键字" className="w-full mb-0">
+                <Input placeholder="姓名/邮箱" allowClear />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={8} lg={6} xl={6}>
-              <Form.Item name="userType" label="用户类型" className="w-full mb-0">
-                <Select placeholder="请选择" allowClear>
+              <Form.Item name="role" label="角色" className="w-full mb-0">
+                <Select placeholder="全部" allowClear>
                   <Option value="admin">管理员</Option>
+                  <Option value="manager">主管</Option>
                   <Option value="user">普通用户</Option>
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8} lg={6} xl={6}>
-              <Form.Item name="name" label="用户名称" className="w-full mb-0">
-                <Input placeholder="请输入用户名称" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6} xl={6}>
-              <Form.Item name="phone" label="手机号码" className="w-full mb-0">
-                <Input placeholder="请输入手机号码" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6} xl={6}>
-              <Form.Item name="status" label="状态" className="w-full mb-0">
-                <Select placeholder="用户状态" allowClear>
-                  <Option value="1">启用</Option>
-                  <Option value="0">禁用</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={6} xl={6}>
-              <Form.Item name="dateRange" label="创建时间" className="w-full mb-0">
-                <RangePicker className="w-full" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12} md={8} lg={12} xl={12} className="text-right">
+            <Col xs={24} sm={24} md={6} lg={10} xl={10} className="text-right">
               <Space>
-                <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>查询</Button>
-                <Button onClick={() => form.resetFields()}>重置</Button>
+                <Button type="primary" htmlType="submit" icon={<SearchOutlined />}>
+                  查询
+                </Button>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => {
+                    searchForm.resetFields();
+                    void fetchUsers();
+                  }}
+                >
+                  重置
+                </Button>
               </Space>
             </Col>
           </Row>
         </Form>
       </div>
 
-      {/* Toolbar */}
       <div className="bg-white p-4 rounded-lg shadow-sm flex-1 flex flex-col">
-        <div className="mb-4 space-x-2">
-          <Button type="primary" icon={<PlusOutlined />}>新增</Button>
-          <Button icon={<EditOutlined />} disabled={selectedRowKeys.length !== 1}>修改</Button>
-          <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0}>删除</Button>
-          <Button icon={<ImportOutlined />}>导入</Button>
-          <Button icon={<ExportOutlined />}>导出</Button>
+        <div className="mb-4 flex gap-2">
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新增
+          </Button>
+          <Button icon={<EditOutlined />} disabled={!selectedRow} onClick={() => selectedRow && openEdit(selectedRow)}>
+            修改
+          </Button>
+          <Popconfirm title="确定删除选中用户？" onConfirm={() => handleDelete(selectedRowKeys.map((k) => String(k)))}>
+            <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeys.length === 0}>
+              删除
+            </Button>
+          </Popconfirm>
+          <Dropdown menu={importMenu}>
+            <Button icon={<UploadOutlined />}>
+              导入 <DownOutlined />
+            </Button>
+          </Dropdown>
         </div>
 
-        {/* Table */}
         <Table
-          rowSelection={rowSelection}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys)
+          }}
           columns={columns}
           dataSource={dataSource}
           rowKey="id"
           loading={loading}
-          pagination={{
-            total: 14970, // Mock total from image
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total) => `共 ${total} 条`,
-            defaultPageSize: 10
-          }}
+          pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           scroll={{ y: 'calc(100vh - 350px)' }}
         />
       </div>
+
+      <Modal
+        title={editing ? '编辑用户' : '新增用户'}
+        open={isEditOpen}
+        okText="保存"
+        cancelText="取消"
+        onCancel={() => {
+          setIsEditOpen(false);
+          setEditing(null);
+          editForm.resetFields();
+        }}
+        onOk={async () => {
+          const values = await editForm.validateFields();
+          const payload = {
+            email: String(values.email || '').trim(),
+            name: String(values.name || '').trim(),
+            role: String(values.role || 'user').trim(),
+            job_title: String(values.job_title || '').trim() || null,
+            password: String(values.password || '')
+          };
+          const res = await importUsers([payload]);
+          if (res.failed) {
+            message.error(res.errors?.[0]?.message || '保存失败');
+            return;
+          }
+          message.success(formatImportSummary(res));
+          setIsEditOpen(false);
+          setEditing(null);
+          editForm.resetFields();
+          await fetchUsers(searchForm.getFieldsValue());
+        }}
+      >
+        <Form form={editForm} layout="vertical" initialValues={{ role: 'user' }}>
+          <Form.Item
+            name="email"
+            label="邮箱"
+            rules={[{ required: true, message: '请输入邮箱' }]}
+          >
+            <Input placeholder="user@xxx.com" disabled={!!editing} />
+          </Form.Item>
+          <Form.Item
+            name="name"
+            label="姓名"
+            rules={[{ required: true, message: '请输入姓名' }]}
+          >
+            <Input placeholder="请输入" />
+          </Form.Item>
+          <Form.Item name="role" label="角色" rules={[{ required: true, message: '请选择角色' }]}>
+            <Select>
+              <Option value="admin">管理员</Option>
+              <Option value="manager">主管</Option>
+              <Option value="user">普通用户</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="job_title" label="职位">
+            <Input placeholder="可选" />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label={editing ? '重置密码' : '初始密码'}
+            rules={editing ? [] : [{ required: true, message: '请输入密码' }]}
+          >
+            <Input.Password placeholder={editing ? '留空则不修改' : '请输入'} autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

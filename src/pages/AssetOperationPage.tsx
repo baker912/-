@@ -3,6 +3,9 @@ import { Table, Button, Space, Input, Modal, Form, Select, DatePicker, message, 
 import { PlusOutlined, SearchOutlined, ReloadOutlined, ExportOutlined, DownOutlined, DeleteOutlined, AppstoreOutlined, UploadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importAssetFlowRecords } from '../lib/importers';
 import { Asset } from '../types';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -32,6 +35,7 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const [form] = Form.useForm();
   const [searchForm] = Form.useForm();
   
@@ -339,6 +343,13 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
     ],
   };
 
+  const importMenu = {
+    items: [
+      { key: 'template', label: '下载导入模板', onClick: () => downloadImportTemplate('asset_flow_records') },
+      { key: 'import', label: '导入数据', onClick: () => setIsImportOpen(true) }
+    ]
+  };
+
   const handleDelete = async (id: string) => {
     try {
       // Should we revert asset status? For now just delete record.
@@ -486,6 +497,23 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
 
   return (
     <div>
+      <ExcelImportModal
+        open={isImportOpen}
+        title={`导入${title}`}
+        sheetNames={['模板']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importAssetFlowRecords(dataBySheet['模板'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('流转记录'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchRecords();
+        }}
+      />
       <Title level={2} className="mb-4">{title}</Title>
       
       <div className="bg-white p-4 mb-4 rounded-lg shadow-sm">
@@ -571,6 +599,9 @@ const AssetOperationPage: React.FC<AssetOperationPageProps> = ({ type, title }) 
       <div className="bg-white p-4 rounded-lg shadow-sm">
         <div className="mb-4 space-x-2">
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>{title}</Button>
+          <Dropdown menu={importMenu}>
+            <Button icon={<UploadOutlined />}>导入 <DownOutlined /></Button>
+          </Dropdown>
           <Dropdown menu={exportMenu}>
             <Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button>
           </Dropdown>

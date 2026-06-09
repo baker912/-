@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Table, Button, Input, Space, Card, Modal, Form, Select, message, Drawer, Tag, Upload, Dropdown, Row, Col } from 'antd';
 import { SearchOutlined, PlusOutlined, ReloadOutlined, UploadOutlined, LinkOutlined, ImportOutlined, DownOutlined, ExportOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importAssetRequests } from '../lib/importers';
 import { useAuth } from '../contexts/AuthContext';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -41,6 +44,7 @@ const RequestList: React.FC = () => {
   // Upload state
   const [uploading, setUploading] = useState(false);
   const [fileList, setFileList] = useState<any[]>([]);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   // Selection state
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -301,23 +305,12 @@ const RequestList: React.FC = () => {
       {
         key: 'template',
         label: '下载模版',
-        onClick: () => {
-          const ws = XLSX.utils.json_to_sheet([
-            {
-              需求名称: '示例需求',
-              需求类别: '固定资产',
-              备注说明: '示例备注'
-            }
-          ]);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, "模版");
-          XLSX.writeFile(wb, `需求导入模版.xlsx`);
-        }
+        onClick: () => downloadImportTemplate('asset_requests')
       },
       {
         key: 'import',
         label: '导入数据',
-        onClick: () => message.info('导入功能开发中')
+        onClick: () => setIsImportOpen(true)
       },
     ],
   };
@@ -389,6 +382,23 @@ const RequestList: React.FC = () => {
 
   return (
     <div>
+      <ExcelImportModal
+        open={isImportOpen}
+        title="导入需求"
+        sheetNames={['模板']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importAssetRequests(dataBySheet['模板'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('需求'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchRequests();
+        }}
+      />
       {/* Header Filter Area */}
       <div className="bg-white p-4 mb-4 rounded-lg shadow-sm flex justify-between items-center">
         <div className="flex items-center gap-4">

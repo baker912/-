@@ -190,9 +190,32 @@ const Dashboard: React.FC = () => {
       setLoading(false); // Stop loading spinner ASAP to show stats
 
       // 2. Fetch Categories and Flows in background
+      const now = dayjs();
+      let start: dayjs.Dayjs | null = null;
+      let end: dayjs.Dayjs | null = null;
+
+      if (flowTimeRange === 'week') {
+        start = now.subtract(7, 'day');
+        end = now;
+      } else if (flowTimeRange === 'month') {
+        start = now.subtract(1, 'month');
+        end = now;
+      } else if (flowTimeRange === 'custom' && customDateRange && customDateRange.length === 2) {
+        start = customDateRange[0];
+        end = customDateRange[1];
+      }
+
+      let flowQuery = supabase
+        .from('asset_flow_records')
+        .select('*, asset:assets!asset_flow_records_asset_id_fkey(asset_code, name, purchase_price)')
+        .order('operation_time', { ascending: false })
+        .limit(50);
+      if (start) flowQuery = flowQuery.gte('operation_time', start.toISOString());
+      if (end) flowQuery = flowQuery.lte('operation_time', end.toISOString());
+
       Promise.all([
         supabase.from('categories').select('*'),
-        supabase.from('asset_flow_records').select('*, asset:assets!asset_flow_records_asset_id_fkey(asset_code, name, purchase_price)').order('operation_time', { ascending: false }).limit(50)
+        flowQuery
       ]).then(([categoriesResult, flowsResult]) => {
         const categoriesData = categoriesResult.data || [];
         const flowsData = flowsResult.data || [];

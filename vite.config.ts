@@ -17,6 +17,12 @@ export default defineConfig({
       ext: '.gz',
     })
   ],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:4000',
+      '/storage': 'http://localhost:4000'
+    }
+  },
   build: {
     sourcemap: false, // Disable sourcemaps for production to save space/time
     rollupOptions: {

@@ -1,7 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { User } from '../types';
+
+type Session = {
+  access_token: string;
+  user: { id: string; email?: string };
+};
 
 interface AuthContextType {
   session: Session | null;
@@ -44,7 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchUserProfile = async (authUser: SupabaseUser) => {
+  const fetchUserProfile = async (authUser: { id: string; email?: string }) => {
     try {
       const { data, error } = await supabase
         .from('users')
@@ -57,7 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Fallback if profile doesn't exist yet (race condition on signup)
         setUser({
           id: authUser.id,
-          email: authUser.email!,
+          email: authUser.email || '',
           name: authUser.email?.split('@')[0] || 'User',
           role: 'user',
           created_at: new Date().toISOString()

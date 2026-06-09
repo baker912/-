@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Table, Button, Input, InputNumber, Space, Card, Modal, Form, message, Drawer, Row, Col, Typography, Select, Upload, Dropdown } from 'antd';
 import { SearchOutlined, PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ImportOutlined, UploadOutlined, LinkOutlined, ExportOutlined, DownOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importAssetDictionary } from '../lib/importers';
 import { useAuth } from '../contexts/AuthContext';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -56,6 +59,7 @@ const AssetDictionary: React.FC = () => {
   const [data, setData] = useState<DictionaryItem[]>([]);
   const [searchForm] = Form.useForm();
   const { user } = useAuth();
+  const [isImportOpen, setIsImportOpen] = useState(false);
   
   // Drawer/Form State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -328,30 +332,12 @@ const AssetDictionary: React.FC = () => {
       {
         key: 'template',
         label: '下载模版',
-        onClick: () => {
-          // Generate a template Excel file
-          const ws = XLSX.utils.json_to_sheet([
-            {
-              项目名称: '示例项目',
-              设备名称: '示例设备',
-              品牌: '示例品牌',
-              型号: '示例型号',
-              单位: '台',
-              单价: 100,
-              供货商: '示例供货商',
-              配件信息: '示例配件',
-              备注信息: '示例备注'
-            }
-          ]);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, "模版");
-          XLSX.writeFile(wb, `资产类目导入模版.xlsx`);
-        }
+        onClick: () => downloadImportTemplate('asset_dictionary')
       },
       {
         key: 'import',
         label: '导入数据',
-        onClick: () => message.info('导入功能开发中')
+        onClick: () => setIsImportOpen(true)
       },
     ],
   };
@@ -475,6 +461,23 @@ const AssetDictionary: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col">
+      <ExcelImportModal
+        open={isImportOpen}
+        title="导入资产类目"
+        sheetNames={['模板']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importAssetDictionary(dataBySheet['模板'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('资产类目'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchData();
+        }}
+      />
       {/* Search Filter Area */}
       <div className="bg-white p-4 mb-4 rounded-lg shadow-sm">
         <Form form={searchForm} layout="inline" className="w-full">

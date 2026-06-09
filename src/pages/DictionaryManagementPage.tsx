@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { 
   Table, 
   Button, 
+  Dropdown,
   Input, 
   Modal, 
   Form, 
@@ -22,10 +23,16 @@ import {
   DeleteOutlined, 
   SearchOutlined, 
   ReloadOutlined,
+  DownOutlined,
+  UploadOutlined,
   BookOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importSysDictionary } from '../lib/importers';
+import * as XLSX from 'xlsx';
 
 interface Dictionary {
   id: string;
@@ -58,6 +65,14 @@ const DictionaryManagementPage: React.FC = () => {
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [editingDict, setEditingDict] = useState<Dictionary | null>(null);
   const [editingItem, setEditingItem] = useState<DictionaryItem | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+
+  const importMenu = {
+    items: [
+      { key: 'template', label: '下载导入模板', onClick: () => downloadImportTemplate('sys_dictionary') },
+      { key: 'import', label: '导入数据', onClick: () => setIsImportOpen(true) }
+    ]
+  };
   
   const [dictForm] = Form.useForm();
   const [itemForm] = Form.useForm();
@@ -294,23 +309,45 @@ const DictionaryManagementPage: React.FC = () => {
 
   return (
     <div className="h-full flex gap-4">
+      <ExcelImportModal
+        open={isImportOpen}
+        title="导入字典与字典项"
+        sheetNames={['模板', '字典项']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importSysDictionary(dataBySheet['模板'] || [], dataBySheet['字典项'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('字典'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchDicts();
+        }}
+      />
       {/* Left Panel: Dictionaries */}
       <div className="w-1/3 min-w-[300px] flex flex-col bg-white rounded-lg shadow-sm">
         <div className="p-4 border-b">
           <div className="flex justify-between items-center mb-4">
             <span className="font-bold text-lg"><BookOutlined className="mr-2" />字典列表</span>
-            <Button 
-              type="primary" 
-              icon={<PlusOutlined />} 
-              size="small"
-              onClick={() => {
-                setEditingDict(null);
-                dictForm.resetFields();
-                setIsDictModalOpen(true);
-              }}
-            >
-              新增
-            </Button>
+            <Space size={8}>
+              <Dropdown menu={importMenu}>
+                <Button icon={<UploadOutlined />} size="small">导入 <DownOutlined /></Button>
+              </Dropdown>
+              <Button 
+                type="primary" 
+                icon={<PlusOutlined />} 
+                size="small"
+                onClick={() => {
+                  setEditingDict(null);
+                  dictForm.resetFields();
+                  setIsDictModalOpen(true);
+                }}
+              >
+                新增
+              </Button>
+            </Space>
           </div>
           <Input.Search 
             placeholder="搜索名称或编码" 

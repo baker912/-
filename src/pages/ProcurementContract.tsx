@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Table, Button, Input, Space, Card, Modal, Form, message, Upload, Row, Col, Typography, Drawer, DatePicker, Dropdown } from 'antd';
 import { SearchOutlined, PlusOutlined, UploadOutlined, LinkOutlined, SaveOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, ImportOutlined, ExportOutlined, DownOutlined } from '@ant-design/icons';
 import { supabase } from '../lib/supabase';
+import { downloadImportTemplate } from '../lib/importTemplates';
+import ExcelImportModal from '../components/ExcelImportModal';
+import { buildErrorReportXlsx, errorReportFileName, formatImportSummary, importProcurementContracts } from '../lib/importers';
 import { useAuth } from '../contexts/AuthContext';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -40,6 +43,7 @@ const ProcurementContract: React.FC = () => {
   const [searchBM, setSearchBM] = useState('');
   const [searchOrder, setSearchOrder] = useState('');
   const { user } = useAuth();
+  const [isImportOpen, setIsImportOpen] = useState(false);
   
   // Drawer/Form State
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -178,6 +182,7 @@ const ProcurementContract: React.FC = () => {
             order_files: s.order_files || [],
             payment_files: s.payment_files || [],
             acceptance_files: s.acceptance_files || [],
+            remarks: s.remarks || null
           }));
           const { error: supplierError } = await supabase.from('contract_suppliers').insert(suppliersPayload);
           if (supplierError) throw supplierError;
@@ -310,25 +315,12 @@ const ProcurementContract: React.FC = () => {
       {
         key: 'template',
         label: '下载模版',
-        onClick: () => {
-          const ws = XLSX.utils.json_to_sheet([
-            {
-              项目名称: '示例项目',
-              BM单号: 'BM000001',
-              采购订单: 'PO000001',
-              项目时间: '2023-Q1',
-              备注: '示例备注'
-            }
-          ]);
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, "模版");
-          XLSX.writeFile(wb, `采购合同导入模版.xlsx`);
-        }
+        onClick: () => downloadImportTemplate('procurement_contracts')
       },
       {
         key: 'import',
         label: '导入数据',
-        onClick: () => message.info('导入功能开发中')
+        onClick: () => setIsImportOpen(true)
       },
     ],
   };
@@ -424,6 +416,23 @@ const ProcurementContract: React.FC = () => {
 
   return (
     <div>
+      <ExcelImportModal
+        open={isImportOpen}
+        title="导入采购合同"
+        sheetNames={['模板', '供应商']}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (dataBySheet) => {
+          const res = await importProcurementContracts(dataBySheet['模板'] || [], dataBySheet['供应商'] || []);
+          if (res.failed) {
+            const wb = buildErrorReportXlsx(res.errors);
+            XLSX.writeFile(wb, errorReportFileName('采购合同'));
+            message.warning(`${formatImportSummary(res)}，已生成错误报告`);
+          } else {
+            message.success(formatImportSummary(res));
+          }
+          await fetchContracts();
+        }}
+      />
       {/* Header Filter Area */}
       <div className="bg-white p-4 mb-4 rounded-lg shadow-sm flex justify-between items-center">
         <Space size="large">

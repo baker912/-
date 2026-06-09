@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Form, Input, Button, Card, message, Divider } from 'antd';
+import { Form, Input, Button, Card, message } from 'antd';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined, GlobalOutlined } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -28,11 +28,11 @@ const Login: React.FC = () => {
 
   // Mock SSO Login
   const handleSSO = () => {
-    messageApi.loading({ content: '正在跳转统一身份认证...', key: 'sso' });
-    setTimeout(() => {
-      messageApi.success({ content: '一键登录成功', key: 'sso' });
-      navigate('/dashboard');
-    }, 1500);
+    messageApi.warning({
+      content: '统一身份认证暂未接入，请使用账号密码登录。',
+      key: 'sso',
+      duration: 3
+    });
   };
 
   const onFinish = async (values: any) => {
@@ -128,7 +128,7 @@ const Login: React.FC = () => {
         <div className="w-full max-w-[440px] transform transition-all hover:scale-[1.01] duration-500">
           <Card 
             className="shadow-2xl border-0 rounded-2xl overflow-hidden backdrop-blur-xl bg-white/90 relative"
-            bodyStyle={{ padding: '48px 40px' }}
+            styles={{ body: { padding: '48px 40px' } }}
           >
             {/* Top Accent Line */}
             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-500"></div>
