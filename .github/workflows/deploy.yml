@@ -32,9 +32,6 @@ jobs:
       # 5. 打包构建产物 (压缩传输速度快10倍)
       - name: Compress dist
         run: tar -zcvf dist.tar.gz dist
-      
-      - name: Compress server
-        run: tar -zcvf server.tar.gz server
 
       # 6. 传输压缩包到服务器
       - name: Upload to Server
@@ -43,7 +40,7 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "dist.tar.gz,server.tar.gz"
+          source: "dist.tar.gz"
           target: "/tmp" # 先传到临时目录
 
       # 7. 解压并部署 (远程执行命令)
@@ -99,7 +96,6 @@ jobs:
                     fi
                     
                     DEPLOYED=true
-                    WEB_DIR=$TARGET_DIR
                     echo "Successfully deployed to $TARGET_DIR"
                 fi
             done
@@ -108,75 +104,12 @@ jobs:
                 echo "Error: No suitable deployment directory found!"
                 exit 1
             fi
-            
-            sudo mkdir -p /opt/apps/asset-management
-            sudo rm -rf /opt/apps/asset-management/server || true
-            sudo mkdir -p /opt/apps/asset-management/server
-            sudo tar -zxvf /tmp/server.tar.gz -C /opt/apps/asset-management/server --strip-components=1
 
-            if [ -f /etc/yum.repos.d/docker-ce.repo ]; then
-              sudo sed -i 's/enabled=1/enabled=0/g' /etc/yum.repos.d/docker-ce.repo || true
-            fi
+            # 4. 清理临时文件
+            sudo rm -f /tmp/dist.tar.gz
 
-            if ! command -v node >/dev/null 2>&1; then
-              sudo yum install -y nodejs || true
-            fi
-            if ! command -v node >/dev/null 2>&1; then
-              curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo -E bash - || true
-              sudo yum install -y nodejs || true
-            fi
-
-            cd /opt/apps/asset-management/server
-            npm install --omit=dev --no-audit --no-fund
-
-            cat > .env <<EOF
-            PORT=4000
-            HOST=127.0.0.1
-            DATABASE_URL=${{ secrets.ASSET_DATABASE_URL }}
-            JWT_SECRET=${{ secrets.ASSET_JWT_SECRET }}
-            UPLOAD_DIR=uploads
-            PUBLIC_BASE_URL=${{ secrets.ASSET_PUBLIC_BASE_URL }}
-            EOF
-
-            if ! command -v pm2 >/dev/null 2>&1; then
-              sudo npm i -g pm2
-            fi
-            if pm2 describe asset-api >/dev/null 2>&1; then
-              pm2 restart asset-api --update-env
-            else
-              pm2 start src/index.js --name asset-api
-            fi
-            pm2 save
-
-            sudo tee /etc/nginx/conf.d/asset-management.conf >/dev/null <<EOF
-            server {
-              listen 80;
-              server_name ${{ secrets.SERVER_HOST }};
-
-              root ${WEB_DIR};
-              index index.html;
-
-              location / {
-                try_files \$uri \$uri/ /index.html;
-              }
-
-              location /api/ {
-                proxy_pass http://127.0.0.1:4000/api/;
-                proxy_set_header Host \$host;
-                proxy_set_header X-Real-IP \$remote_addr;
-              }
-
-              location /storage/ {
-                proxy_pass http://127.0.0.1:4000/storage/;
-              }
-            }
-            EOF
-            sudo nginx -t
-            
             # 5. 重启 Nginx (Restart 比 Reload 更彻底)
             echo "Restarting Nginx..."
             sudo systemctl restart nginx || sudo service nginx restart || true
-            
-            sudo rm -f /tmp/dist.tar.gz /tmp/server.tar.gz || true
-            
+
             echo "Deployment finished successfully!"
